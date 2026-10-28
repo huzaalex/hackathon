@@ -13,10 +13,10 @@ def now_iso() -> str:
 @dataclass
 class Case:
     id: str
-    kind: str  # DOCUMENT | EVENIMENT
+    kind: str  # DOCUMENT | EVENT
     title: str
     created_at: str = field(default_factory=now_iso)
-    status: str = "IN_ASTEPTARE"  # IN_ASTEPTARE | IN_LUCRU | NECESITA_OPERATOR | FINALIZAT | EROARE
+    status: str = "QUEUED"  # QUEUED | RUNNING | NEEDS_REVIEW | DONE | FAILED
     document_name: str | None = None
     document_bytes: bytes | None = None
     trigger: dict | None = None
@@ -36,7 +36,7 @@ class Case:
     def summary_dict(self) -> dict:
         return {"id": self.id, "kind": self.kind, "title": self.title, "created_at": self.created_at,
                 "status": self.status, "outcome": self.outcome, "document_name": self.document_name,
-                "client_id": (self.blackboard.get("identificare") or {}).get("client_id")}
+                "client_id": (self.blackboard.get("identification") or {}).get("client_id")}
 
     def detail_dict(self) -> dict:
         return {**self.summary_dict(), "summary": self.summary, "blackboard": self.blackboard, "review": self.review,
@@ -50,7 +50,7 @@ class CaseStore:
         self._seq = itertools.count(1)
 
     def create(self, **kwargs) -> Case:
-        case = Case(id=f"CAZ-{next(self._seq):04d}", **kwargs)
+        case = Case(id=f"CASE-{next(self._seq):04d}", **kwargs)
         self.cases[case.id] = case
         return case
 

@@ -42,7 +42,7 @@ class Transaction(Base):
     booked_at: Mapped[datetime] = mapped_column(DateTime)
     amount: Mapped[Decimal] = mapped_column(Money)
     direction: Mapped[str] = mapped_column(String(6))  # CREDIT | DEBIT
-    source: Mapped[str] = mapped_column(String(40))  # SALARIU, PENSIE, ALOCATIE, AJUTOR_SOCIAL, TRANSFER, PLATA...
+    source: Mapped[str] = mapped_column(String(40))  # SALARY, PENSION, CHILD_ALLOWANCE, SOCIAL_BENEFIT, TRANSFER, PAYMENT...
     description: Mapped[str] = mapped_column(String(255))
 
 
@@ -53,7 +53,7 @@ class Garnishment(Base):
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
     case_ref: Mapped[str] = mapped_column(String(80), index=True)
     case_ref_norm: Mapped[str] = mapped_column(String(80), index=True)
-    issuer_type: Mapped[str] = mapped_column(String(32))  # EXECUTOR_JUDECATORESC | ANAF | PRIMARIE | ALT_EMITENT
+    issuer_type: Mapped[str] = mapped_column(String(32))  # BAILIFF | TAX_AUTHORITY | LOCAL_TAX_AUTHORITY | OTHER
     issuer_name: Mapped[str] = mapped_column(String(160))
     creditor: Mapped[str] = mapped_column(String(160))
     claim_type: Mapped[str] = mapped_column(String(24))

@@ -101,7 +101,7 @@ def add_client(cid, first, last, sex, birth, county, seq, address):
     return c
 
 
-def add_account(client_id, currency="RON", product="Cont curent", status="ACTIVE"):
+def add_account(client_id, currency="RON", product="Current account", status="ACTIVE"):
     _iban_seq[0] += 1
     acc = {"iban": make_iban(_iban_seq[0]), "client_id": client_id, "currency": currency,
            "product": product, "status": status, "balance": 0.0}
@@ -117,59 +117,59 @@ def tx(acc, days_ago, amount, source, description, direction="CREDIT"):
 
 
 def debit(acc, days_ago, amount, description):
-    tx(acc, days_ago, amount, "PLATA", description, direction="DEBIT")
+    tx(acc, days_ago, amount, "PAYMENT", description, direction="DEBIT")
 
 
 # Scenario clients (fixed so the demo is deterministic)
 ion = add_client("CL001", "Ion", "Popescu", "M", date(1985, 3, 12), 42, 15, "Str. Mihai Eminescu nr. 14, Sector 2, București")
 a = add_account("CL001")
-tx(a, 45, 9000, "TRANSFER", "Sold reportat")
-tx(a, 20, 4200, "TRANSFER", "Încasare factură servicii IT")
-debit(a, 10, 750, "Plată card POS")
-b = add_account("CL001", product="Cont economii")
-tx(b, 50, 3000, "TRANSFER", "Depunere economii")
-add_account("CL001", product="Cont curent (închis)", status="CLOSED")
+tx(a, 45, 9000, "TRANSFER", "Opening balance")
+tx(a, 20, 4200, "TRANSFER", "IT services invoice payment")
+debit(a, 10, 750, "Card payment (POS)")
+b = add_account("CL001", product="Savings account")
+tx(b, 50, 3000, "TRANSFER", "Savings deposit")
+add_account("CL001", product="Current account (closed)", status="CLOSED")
 
 maria = add_client("CL002", "Maria", "Ionescu", "F", date(1990, 7, 23), 12, 87, "Str. Memorandumului nr. 5, Cluj-Napoca, jud. Cluj")
 a = add_account("CL002")
-tx(a, 45, 1500, "TRANSFER", "Sold reportat")
-tx(a, 15, 6500, "SALARIU", "Salariu - SC SOFTCLUJ SRL")
-debit(a, 5, 1200, "Plată chirie")
+tx(a, 45, 1500, "TRANSFER", "Opening balance")
+tx(a, 15, 6500, "SALARY", "Salary - SC SOFTCLUJ SRL")
+debit(a, 5, 1200, "Rent payment")
 
 elena = add_client("CL003", "Elena", "Dumitrescu", "F", date(1988, 11, 2), 22, 41, "Bd. Independenței nr. 30, Iași, jud. Iași")
 a = add_account("CL003")
-tx(a, 45, 300, "TRANSFER", "Sold reportat")
-tx(a, 12, 4200, "SALARIU", "Salariu - SC MOLDOVA RETAIL SRL")
-tx(a, 8, 719, "ALOCATIE", "Alocație de stat pentru copii - AJPIS Iași")
+tx(a, 45, 300, "TRANSFER", "Opening balance")
+tx(a, 12, 4200, "SALARY", "Salary - SC MOLDOVA RETAIL SRL")
+tx(a, 8, 719, "CHILD_ALLOWANCE", "State child allowance - AJPIS Iasi")
 
 gheorghe = add_client("CL004", "Gheorghe", "Stan", "M", date(1979, 5, 17), 43, 102, "Str. Fizicienilor nr. 8, Sector 3, București")
 a_gh = add_account("CL004")
-tx(a_gh, 50, 300, "TRANSFER", "Sold reportat")
-tx(a_gh, 14, 4500, "SALARIU", "Salariu - SC CONSTRUCT GRUP SRL")
+tx(a_gh, 50, 300, "TRANSFER", "Opening balance")
+tx(a_gh, 14, 4500, "SALARY", "Salary - SC CONSTRUCT GRUP SRL")
 
 popa1 = add_client("CL005", "Andrei", "Popa", "M", date(1992, 4, 15), 43, 33, "Str. Florilor nr. 12, Sector 3, București")
 a = add_account("CL005")
-tx(a, 40, 3200, "TRANSFER", "Sold reportat")
+tx(a, 40, 3200, "TRANSFER", "Opening balance")
 popa2 = add_client("CL006", "Andrei", "Popa", "M", date(1987, 9, 30), 43, 58, "Str. Florilor nr. 17, Sector 3, București")
 a = add_account("CL006")
-tx(a, 40, 5100, "TRANSFER", "Sold reportat")
+tx(a, 40, 5100, "TRANSFER", "Opening balance")
 
 vasile = add_client("CL007", "Vasile", "Georgescu", "M", date(1970, 1, 25), 42, 77, "Calea Moșilor nr. 101, Sector 2, București")
 a_va = add_account("CL007")
-tx(a_va, 60, 7300, "TRANSFER", "Sold reportat")
+tx(a_va, 60, 7300, "TRANSFER", "Opening balance")
 
 ana = add_client("CL008", "Ana", "Constantinescu", "F", date(1983, 6, 9), 41, 64, "Str. Aviatorilor nr. 3, Sector 1, București")
-a = add_account("CL008", currency="EUR", product="Cont curent EUR")
-tx(a, 40, 3000, "TRANSFER", "Sold reportat")
+a = add_account("CL008", currency="EUR", product="EUR current account")
+tx(a, 40, 3000, "TRANSFER", "Opening balance")
 
 mihai = add_client("CL009", "Mihai", "Radu", "M", date(1995, 12, 1), 35, 19, "Str. Lugojului nr. 9, Timișoara, jud. Timiș")
 a = add_account("CL009")
-tx(a, 45, 650, "TRANSFER", "Sold reportat")
-debit(a, 20, 500, "Plată rată telefon")
+tx(a, 45, 650, "TRANSFER", "Opening balance")
+debit(a, 20, 500, "Phone instalment payment")
 
 ioana = add_client("CL010", "Ioana", "Stoica", "F", date(1991, 2, 14), 13, 90, "Bd. Tomis nr. 120, Constanța, jud. Constanța")
 a = add_account("CL010")
-tx(a, 40, 2600, "TRANSFER", "Sold reportat")
+tx(a, 40, 2600, "TRANSFER", "Opening balance")
 
 # Not a client of the bank (scenario 7)
 cristian = {"first_name": "Cristian", "last_name": "Marin", "cnp": make_cnp("M", date(1982, 8, 19), 46, 21),
@@ -189,25 +189,25 @@ for i in range(11, 31):
     c = add_client(f"CL{i:03d}", first, random.choice(LAST), sex, birth, county, random.randint(1, 999),
                    f"Str. {random.choice(['Libertății', 'Unirii', 'Victoriei', 'Republicii'])} nr. {random.randint(1, 120)}, {city}")
     acc = add_account(c["id"])
-    tx(acc, 45, random.randint(200, 9000), "TRANSFER", "Sold reportat")
+    tx(acc, 45, random.randint(200, 9000), "TRANSFER", "Opening balance")
     if random.random() < 0.7:
-        tx(acc, random.randint(3, 25), random.randint(3000, 9000), "SALARIU", "Salariu")
+        tx(acc, random.randint(3, 25), random.randint(3000, 9000), "SALARY", "Salary")
     if random.random() < 0.2:
-        tx(acc, random.randint(3, 25), 719, "ALOCATIE", "Alocație de stat pentru copii")
-    debit(acc, random.randint(1, 20), random.randint(50, 400), "Plată card POS")
+        tx(acc, random.randint(3, 25), 719, "CHILD_ALLOWANCE", "State child allowance")
+    debit(acc, random.randint(1, 20), random.randint(50, 400), "Card payment (POS)")
 
 # Existing garnishments already registered at the bank
 received_30 = (datetime.combine(TODAY - timedelta(days=30), datetime.min.time()) + timedelta(hours=9)).isoformat()
 garnishments.append({
-    "id": "GR-0001", "client_id": "CL004", "case_ref": "DGRFPB-S3/4471/2026", "issuer_type": "ANAF",
-    "issuer_name": "ANAF - Administrația Sector 3 a Finanțelor Publice", "creditor": "Statul român prin ANAF",
-    "claim_type": "FISCALA", "total_amount": 6000.0, "received_at": received_30, "status": "ACTIVE",
+    "id": "GR-0001", "client_id": "CL004", "case_ref": "DGRFPB-S3/4471/2026", "issuer_type": "TAX_AUTHORITY",
+    "issuer_name": "ANAF - Bucharest Sector 3 Public Finance Administration", "creditor": "Romanian State (ANAF)",
+    "claim_type": "TAX", "total_amount": 6000.0, "received_at": received_30, "status": "ACTIVE",
 })
 holds.append({"iban": a_gh["iban"], "garnishment_id": "GR-0001", "amount": 1800.0, "amount_ron": 1800.0})
 garnishments.append({
-    "id": "GR-0002", "client_id": "CL007", "case_ref": "877/2025", "issuer_type": "EXECUTOR_JUDECATORESC",
+    "id": "GR-0002", "client_id": "CL007", "case_ref": "877/2025", "issuer_type": "BAILIFF",
     "issuer_name": "BEJ Ionescu Adrian", "creditor": "SC Credit Rapid IFN SA",
-    "claim_type": "CHIROGRAFARA", "total_amount": 2000.0, "received_at": received_30, "status": "ACTIVE",
+    "claim_type": "UNSECURED", "total_amount": 2000.0, "received_at": received_30, "status": "ACTIVE",
 })
 holds.append({"iban": a_va["iban"], "garnishment_id": "GR-0002", "amount": 2000.0, "amount_ron": 2000.0})
 
@@ -352,81 +352,81 @@ def full(c):
     return f"{c['first_name']} {c['last_name']}"
 
 
-scenario("01_executor_simplu.pdf", "Poprire simplă – executor judecătoresc",
-         "Ion Popescu, datorie la o firmă de telefonie. Are bani suficienți în cont.",
-         "Se blochează integral 5.000 lei și se trimite confirmarea către executor.",
+scenario("01_executor_simplu.pdf", "Simple garnishment from a bailiff",
+         "Ion Popescu owes a telecom company. He has enough money in his account.",
+         "The full 5,000 RON is held and a confirmation letter is sent to the bailiff.",
          executor_doc(**BEJ_M, case_ref="1234/2026", reg_no="5521", debtor=full(ion), cnp=ion["cnp"], address=ion["address"],
                       amount=5000, creditor="SC TelcoNet Romania SA", title="contractul de abonament nr. 88412/2024, învestit cu formulă executorie",
                       claim_desc="facturi de telefonie neachitate", creditor_iban=CONSEMNARE))
 
-scenario("02_anaf_cnp_gresit.pdf", "ANAF – CNP greșit cu o cifră",
-         "Poprire fiscală pentru Maria Ionescu, dar CNP-ul din document are o cifră greșită.",
-         "Agentul detectează cifra de control invalidă, găsește clientul corect și aplică poprirea (2.300 lei).",
+scenario("02_anaf_cnp_gresit.pdf", "Tax authority (ANAF) - CNP with one wrong digit",
+         "Tax garnishment for Maria Ionescu, but the CNP in the document has one wrong digit.",
+         "The agent detects the invalid check digit, finds the right client and applies the garnishment (2,300 RON).",
          anaf_doc(unit="Administrația Județeană a Finanțelor Publice Cluj", case_ref="AJFP-CJ/90321/2026", reg_no="CJ-77120",
                   debtor=full(maria), cnp=corrupt_cnp(maria["cnp"]), address=maria["address"], amount=2300,
                   title="decizia de impunere nr. 4410/2025", treasury_iban="RO12TREZ2165067XXX012345"))
 
-scenario("03_salariu_si_alocatie.pdf", "Cont cu salariu + alocație",
-         "Elena Dumitrescu are în cont salariul și alocația copilului. Datorie de 4.000 lei.",
-         "Alocația e protejată integral, din salariu se ia max. 1/3. Blocare parțială (~1.700 lei); poprirea rămâne activă.",
+scenario("03_salariu_si_alocatie.pdf", "Account with salary + child allowance",
+         "Elena Dumitrescu received her salary and her child allowance. Debt of 4,000 RON.",
+         "The allowance is fully protected and at most 1/3 of the salary can be taken. Partial hold (~1,700 RON); the garnishment stays active.",
          executor_doc(**BEJ_M, case_ref="2210/2026", reg_no="5530", debtor=full(elena), cnp=elena["cnp"], address=elena["address"],
                       amount=4000, creditor="SC Mobila Expres SRL", title="sentința civilă nr. 1022/2025 a Judecătoriei Iași",
                       claim_desc="contravaloare bunuri cumpărate în rate și neachitate", creditor_iban=CONSEMNARE))
 
-scenario("04_pensie_alimentara.pdf", "A doua poprire – pensie alimentară (prioritate)",
-         "Gheorghe Stan are deja o poprire ANAF activă. Vine o poprire pentru pensie de întreținere a copilului.",
-         "Pensia alimentară are prioritate față de creanța fiscală: blocările se recalculează pentru ambele popriri.",
+scenario("04_pensie_alimentara.pdf", "Second garnishment - child support (priority)",
+         "Gheorghe Stan already has an active ANAF garnishment. A child support garnishment arrives.",
+         "Child support ranks above the tax claim: holds are recomputed for both garnishments.",
          executor_doc(bej="Vasilescu Maria", bej_address="Bd. Unirii nr. 45, Sector 3, București", case_ref="3105/2026", reg_no="1180",
                       debtor=full(gheorghe), cnp=gheorghe["cnp"], address=gheorghe["address"], amount=3000,
                       creditor="Stan Larisa, în numele minorului Stan David", title="sentința civilă nr. 5512/2025 a Judecătoriei Sectorului 3",
                       claim_desc="pensie de întreținere restantă pentru copilul minor", creditor_iban=CONSEMNARE))
 
-scenario("05_omonim_ambiguu.pdf", "Omonimi – identificare ambiguă",
-         "Poprire pentru „Andrei Popa”, fără CNP lizibil. Banca are doi clienți cu acest nume pe aceeași stradă.",
-         "Agentul nu poate decide singur și cere confirmarea unui operator uman.",
+scenario("05_omonim_ambiguu.pdf", "Namesakes - ambiguous identification",
+         "Garnishment for Andrei Popa without a readable CNP. The bank has two clients with this name on the same street.",
+         "The agent cannot decide on its own and asks a human operator to confirm.",
          executor_doc(**BEJ_M, case_ref="2987/2026", reg_no="5544", debtor="Andrei Popa", cnp="[indescifrabil]",
                       address="Str. Florilor nr. 1[?], Sector 3, București", amount=1200, creditor="SC Energie Plus SA",
                       title="contractul de furnizare nr. 55120/2023", claim_desc="facturi de energie electrică neachitate",
                       creditor_iban=CONSEMNARE))
 
-scenario("06_ridicare_poprire.pdf", "Ridicare de poprire",
-         "Executorul anunță că Vasile Georgescu a plătit datoria și cere deblocarea conturilor.",
-         "Agentul recunoaște tipul de document, găsește poprirea GR-0002 și eliberează cei 2.000 lei blocați.",
+scenario("06_ridicare_poprire.pdf", "Garnishment release",
+         "The bailiff reports that Vasile Georgescu paid the debt and asks for the accounts to be unblocked.",
+         "The agent recognises the document type, finds garnishment GR-0002 and releases the 2,000 RON on hold.",
          executor_doc(bej="Ionescu Adrian", bej_address="Str. Polonă nr. 12, Sector 1, București", case_ref="877/2025", reg_no="9012",
                       debtor=full(vasile), cnp=vasile["cnp"], address=vasile["address"], amount=2000,
                       creditor="SC Credit Rapid IFN SA", title="", claim_desc="", creditor_iban="", lift_of="7745/2025"))
 
-scenario("07_debitor_inexistent.pdf", "Debitorul nu este client",
-         "Poprire pentru Cristian Marin, care nu are conturi la bancă.",
-         "Agentul confirmă că persoana nu e client și generează răspunsul „nu deține conturi”.",
+scenario("07_debitor_inexistent.pdf", "Debtor is not a client",
+         "Garnishment for Cristian Marin, who has no accounts at the bank.",
+         "The agent confirms the person is not a client and generates the no-accounts reply.",
          executor_doc(**BEJ_M, case_ref="3320/2026", reg_no="5561", debtor=full(cristian), cnp=cristian["cnp"], address=cristian["address"],
                       amount=8700, creditor="SC Auto Leasing SA", title="contractul de leasing nr. 3390/2022",
                       claim_desc="rate de leasing restante", creditor_iban=CONSEMNARE))
 
-scenario("08_primarie_cont_euro.pdf", "Primărie – cont în euro",
-         "Poprire de 6.000 lei pentru impozite locale; clienta Ana Constantinescu are doar cont în EUR.",
-         "Agentul ia cursul BNR al zilei și blochează echivalentul în EUR.",
+scenario("08_primarie_cont_euro.pdf", "Local tax authority - EUR account",
+         "6,000 RON garnishment for local taxes; the client Ana Constantinescu only has an EUR account.",
+         "The agent fetches the official exchange rate of the day and holds the EUR equivalent.",
          primarie_doc(sector=1, case_ref="DGITL-S1/12004/2026", reg_no="44018", debtor=full(ana), cnp=ana["cnp"], address=ana["address"],
                       amount=6000, details="Impozit pe clădiri 2024–2025, taxă auto, majorări de întârziere",
                       iban="RO77TREZ7015007XXX008899"))
 
-scenario("09_fonduri_insuficiente.pdf", "Fonduri insuficiente + încasare viitoare",
-         "Mihai Radu are doar 150 lei. Datorie de 3.500 lei.",
-         "Se blochează 150 lei, poprirea rămâne activă. Apoi: „Simulează încasare” salariu 5.000 lei → agentul se reactivează singur.",
+scenario("09_fonduri_insuficiente.pdf", "Insufficient funds + future credit",
+         "Mihai Radu has only 150 RON. Debt of 3,500 RON.",
+         "150 RON is held and the garnishment stays active. Then simulate an incoming salary of 5,000 RON and the agent reacts on its own.",
          executor_doc(**BEJ_M, case_ref="3401/2026", reg_no="5570", debtor=full(mihai), cnp=mihai["cnp"], address=mihai["address"],
                       amount=3500, creditor="SC Fitness Club SRL", title="sentința civilă nr. 220/2026 a Judecătoriei Timișoara",
                       claim_desc="abonamente neachitate și penalități", creditor_iban=CONSEMNARE))
 
-scenario("10_scanat.pdf", "Document scanat (fără text)",
-         "Poprire pentru Ioana Stoica primită ca scan (imagine), ușor rotit și cu zgomot.",
-         "Extragerea de text eșuează; agentul trece automat pe citire vizuală (imagine) și continuă.",
+scenario("10_scanat.pdf", "Scanned document (no text layer)",
+         "Garnishment for Ioana Stoica received as a scan (image), slightly rotated and noisy.",
+         "Text extraction fails; the agent automatically switches to reading the page image and continues.",
          scanned(executor_doc(**BEJ_M, case_ref="3455/2026", reg_no="5583", debtor=full(ioana), cnp=ioana["cnp"], address=ioana["address"],
                               amount=1500, creditor="SC Clinica Medicală Mare SRL", title="sentința civilă nr. 870/2026 a Judecătoriei Constanța",
                               claim_desc="servicii medicale neachitate", creditor_iban=CONSEMNARE)))
 
-scenario("11_duplicat_email.pdf", "Duplicat (aceeași poprire, primită și pe e-mail)",
-         "Copia trimisă pe e-mail a popririi din scenariul 1. Rulați-l DUPĂ scenariul 1.",
-         "Agentul detectează dosarul deja înregistrat și nu blochează banii a doua oară.",
+scenario("11_duplicat_email.pdf", "Duplicate (same garnishment, also received by e-mail)",
+         "The e-mailed copy of the garnishment from scenario 1. Run it AFTER scenario 1.",
+         "The agent detects the already registered case and does not hold the money twice.",
          executor_doc(**BEJ_M, case_ref="1234/2026", reg_no="5521", debtor=full(ion), cnp=ion["cnp"], address=ion["address"],
                       amount=5000, creditor="SC TelcoNet Romania SA", title="contractul de abonament nr. 88412/2024, învestit cu formulă executorie",
                       claim_desc="facturi de telefonie neachitate", creditor_iban=CONSEMNARE,

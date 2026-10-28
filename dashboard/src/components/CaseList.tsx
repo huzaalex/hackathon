@@ -9,8 +9,8 @@ interface Props {
 export default function CaseList({ cases, selected, onSelect }: Props) {
   return (
     <section className="cases">
-      <h3>Cazuri ({cases.length})</h3>
-      {!cases.length && <p className="muted">Niciun caz încă.</p>}
+      <h3>Cases ({cases.length})</h3>
+      {!cases.length && <p className="muted">No cases yet.</p>}
       <ul>
         {cases.map((c) => (
           <li key={c.id} className={c.id === selected ? "active" : ""} onClick={() => onSelect(c.id)}>
@@ -19,7 +19,7 @@ export default function CaseList({ cases, selected, onSelect }: Props) {
               <span className={`badge ${c.status}`}>{STATUS_LABEL[c.status]}</span>
             </div>
             <div className="case-title">
-              {c.kind === "EVENIMENT" ? "⚡ " : "📄 "}
+              <span className={`kind ${c.kind}`}>{c.kind === "EVENT" ? "Event" : "Document"}</span>
               {c.title}
             </div>
             {c.outcome && <div className="case-outcome">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</div>}

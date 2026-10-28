@@ -12,8 +12,30 @@ from .runtime import Agent, AgentError, PauseForHuman, Tool, ToolError
 from .services import core, docs, fx, rules
 from .store import Case, emit
 
-CLAIM_TYPES = ["INTRETINERE", "SALARIALA", "FISCALA", "CHIROGRAFARA"]
+CLAIM_TYPES = ["CHILD_SUPPORT", "WAGE", "TAX", "UNSECURED"]
 NULLABLE_STR = {"type": ["string", "null"]}
+
+LANGUAGE_RULE = ("Write everything (reasoning, messages, instructions, results) in clear English. "
+                 "Source documents are in Romanian: copy names, addresses and reference numbers exactly as written, "
+                 "but describe them in English. Never use emojis.")
+
+CLAIM_LABEL = {"CHILD_SUPPORT": "child support", "WAGE": "wage claim", "TAX": "tax claim", "UNSECURED": "other (unsecured) claim",
+               "UNKNOWN": "unknown claim type"}
+DOC_TYPE_LABEL = {"GARNISHMENT_ORDER": "Garnishment order", "GARNISHMENT_RELEASE": "Garnishment release",
+                  "OTHER_DOCUMENT": "Other document"}
+DECISION_LABEL = {"APPLY_GARNISHMENT": "apply the garnishment", "DUPLICATE": "duplicate, do nothing", "RELEASE": "release the garnishment",
+                  "REEVALUATE": "re-evaluate the holds", "NO_ACCOUNTS": "no accounts to garnish",
+                  "NEEDS_OPERATOR": "needs a human operator"}
+LETTER_LABEL = {"GARNISHMENT_CONFIRMATION": "garnishment confirmation", "NO_ACCOUNTS": "debtor has no accounts",
+                "RELEASE_CONFIRMATION": "release confirmation", "DUPLICATE_NOTICE": "duplicate notice"}
+
+
+def money(x, currency="RON") -> str:
+    return f"{x:,.2f} {currency}" if isinstance(x, (int, float)) else "-"
+
+
+def pct(x) -> str:
+    return f"{round(x * 100)}%" if isinstance(x, (int, float)) else "-"
 
 
 def bb(case: Case, key: str, required: str | None = None):
@@ -24,14 +46,14 @@ def bb(case: Case, key: str, required: str | None = None):
 
 
 def client_id_of(case: Case) -> str:
-    ident = bb(case, "identificare", "Clientul nu a fost identificat încă (rulează întâi agentul de identificare).")
-    if ident.get("status") != "IDENTIFICAT" or not ident.get("client_id"):
-        raise ToolError(f"Identificarea nu este finală (status {ident.get('status')}).")
+    ident = bb(case, "identification", "The client has not been identified yet (run the identification agent first).")
+    if ident.get("status") != "IDENTIFIED" or not ident.get("client_id"):
+        raise ToolError(f"Identification is not final (status {ident.get('status')}).")
     return ident["client_id"]
 
 
 def blackboard_view(case: Case) -> str:
-    view = {k: v for k, v in case.blackboard.items() if k != "extragere_text"}
+    view = {k: v for k, v in case.blackboard.items() if k != "text_extraction"}
     return json.dumps(view, ensure_ascii=False, indent=2, default=str)
 
 
@@ -39,22 +61,28 @@ def schema(properties: dict, required: list[str] | None = None) -> dict:
     return {"type": "object", "properties": properties, "required": required or list(properties), "additionalProperties": False}
 
 
+def clients_found(result) -> str:
+    if not result:
+        return "No matching client found."
+    return f"Found {len(result)} client(s): " + "; ".join(f"{c['id']} {c['full_name']}, {c['address']}" for c in result)
+
+
 NO_INPUT = schema({}, [])
 
 
-# ====================================================================== Agent Citire
+# ====================================================================== Reader agent
 
 async def t_read_document(case: Case, _):
     if not case.document_bytes:
-        raise ToolError("Cazul nu are document atașat.")
+        raise ToolError("The case has no document attached.")
     r = await docs.extract(case.document_name or "document.pdf", case.document_bytes)
-    case.blackboard["extragere_text"] = {"pagini": r["pages"], "strat_text": r["has_text_layer"]}
+    case.blackboard["text_extraction"] = {"pages": r["pages"], "text_layer": r["has_text_layer"]}
     if r["has_text_layer"]:
-        return f"Document PDF cu {r['pages']} pagini, strat de text prezent.\n\n{r['text']}"
+        return f"PDF document with {r['pages']} page(s), text layer present.\n\n{r['text']}"
     if not r["page_images_png_b64"]:
-        raise ToolError("Documentul nu are text și nu a putut fi randat ca imagine.")
-    blocks = [{"type": "text", "text": f"Documentul NU are strat de text (pare scanat, {r['pages']} pagini). "
-                                       "Urmează imaginile paginilor: citește-le vizual, cu atenție la cifre."}]
+        raise ToolError("The document has no text and could not be rendered as an image.")
+    blocks = [{"type": "text", "text": f"The document has NO text layer (it looks scanned, {r['pages']} page(s)). "
+                                       "The page images follow: read them visually, paying close attention to digits."}]
     blocks += [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}}
                for b64 in r["page_images_png_b64"]]
     return blocks
@@ -64,50 +92,79 @@ async def t_validate_cnp(_case: Case, inp):
     return await rules.validate_cnp(inp["cnp"])
 
 
+def summarize_cnp(r) -> str:
+    if r.get("valid"):
+        return f"The CNP is valid (born {r.get('birth_date')}, {r.get('county')})."
+    return "The CNP is invalid: " + "; ".join(r.get("errors") or ["unknown reason"]) + "."
+
+
+def describe_document(d: dict) -> str:
+    parts = [f"{DOC_TYPE_LABEL.get(d.get('document_type'), 'Document')} from {d.get('issuer_name') or 'an unknown issuer'}."]
+    debtor = d.get("debtor_name") or "unknown"
+    cnp = d.get("debtor_cnp")
+    parts.append(f"Debtor: {debtor}" + (f", CNP {cnp}" + (" (invalid)" if d.get("cnp_valid") is False else "") if cnp else ", no readable CNP") + ".")
+    if d.get("amount"):
+        parts.append(f"Amount: {money(d['amount'], d.get('currency') or 'RON')}.")
+    if d.get("case_number"):
+        parts.append(f"Case number {d['case_number']}.")
+    parts.append(f"Claim type: {CLAIM_LABEL.get(d.get('claim_type'), d.get('claim_type'))}. Confidence {pct(d.get('confidence'))}.")
+    if d.get("issues"):
+        parts.append("Issues: " + "; ".join(d["issues"]))
+    return " ".join(parts)
+
+
 EXTRACTION_SCHEMA = schema({
-    "tip_document": {"type": "string", "enum": ["INFIINTARE_POPRIRE", "RIDICARE_POPRIRE", "ALT_DOCUMENT"]},
-    "emitent_tip": {"type": "string", "enum": ["EXECUTOR_JUDECATORESC", "ANAF", "PRIMARIE", "ALT_EMITENT"]},
-    "emitent_nume": {"type": "string"},
-    "numar_dosar": {**NULLABLE_STR, "description": "dosarul de executare / dosarul fiscal"},
-    "numar_inregistrare": {**NULLABLE_STR, "description": "numărul adresei"},
-    "debitor_nume": NULLABLE_STR,
-    "debitor_cnp": {**NULLABLE_STR, "description": "exact cum apare în document; null dacă lipsește sau e ilizibil"},
-    "debitor_adresa": NULLABLE_STR,
+    "document_type": {"type": "string", "enum": ["GARNISHMENT_ORDER", "GARNISHMENT_RELEASE", "OTHER_DOCUMENT"]},
+    "issuer_type": {"type": "string", "enum": ["BAILIFF", "TAX_AUTHORITY", "LOCAL_TAX_AUTHORITY", "OTHER"]},
+    "issuer_name": {"type": "string"},
+    "case_number": {**NULLABLE_STR, "description": "enforcement case / tax file number"},
+    "registration_number": {**NULLABLE_STR, "description": "number of the letter itself"},
+    "debtor_name": NULLABLE_STR,
+    "debtor_cnp": {**NULLABLE_STR, "description": "exactly as written; null if missing or unreadable"},
+    "debtor_address": NULLABLE_STR,
     "creditor": NULLABLE_STR,
-    "suma": {"type": ["number", "null"]},
-    "moneda": {"type": "string"},
-    "tip_creanta": {"type": "string", "enum": CLAIM_TYPES + ["NECUNOSCUT"]},
-    "descriere_creanta": NULLABLE_STR,
-    "iban_virare": NULLABLE_STR,
-    "referinta_poprire_ridicata": {**NULLABLE_STR, "description": "doar pentru ridicări: adresa/poprirea vizată"},
+    "amount": {"type": ["number", "null"]},
+    "currency": {"type": "string"},
+    "claim_type": {"type": "string", "enum": CLAIM_TYPES + ["UNKNOWN"]},
+    "claim_description": {**NULLABLE_STR, "description": "short description in English"},
+    "payment_iban": NULLABLE_STR,
+    "released_reference": {**NULLABLE_STR, "description": "for releases only: the garnishment/letter being released"},
     "cnp_valid": {"type": ["boolean", "null"]},
-    "incredere": {"type": "number", "description": "între 0 și 1"},
-    "probleme": {"type": "array", "items": {"type": "string"}},
+    "confidence": {"type": "number", "description": "between 0 and 1"},
+    "issues": {"type": "array", "items": {"type": "string"}, "description": "in English"},
 })
 
-citire = Agent(
-    key="document", label="Agent Citire", effort=settings.llm_subagent_effort, result_schema=EXTRACTION_SCHEMA,
-    system=f"""Ești AGENTUL DE CITIRE al departamentului de executări silite din {settings.bank_name}.
-Primești o adresă oficială trimisă băncii: înființare de poprire, ridicare de poprire sau alt document.
+reader = Agent(
+    key="document", label="Reader Agent", effort=settings.llm_subagent_effort, result_schema=EXTRACTION_SCHEMA,
+    describe_result=describe_document,
+    system=f"""You are the READER AGENT of the enforcement department of {settings.bank_name}, a Romanian bank.
+You receive an official letter sent to the bank: a garnishment order (adresă de înființare a popririi),
+a garnishment release (adresă de ridicare a popririi) or some other document.
 
-- Folosește citeste_document. Dacă documentul e scanat, vei primi imaginile paginilor: citește-le vizual.
-- Extrage câmpurile exact cum apar. Nu completa date lipsă sau ilizibile: pune null și descrie problema în "probleme".
-- Validează CNP-ul cu valideaza_cnp și setează cnp_valid. Nu corecta tu CNP-ul.
-- Clasifică tipul creanței:
-  INTRETINERE = pensie de întreținere/alimentară; SALARIALA = drepturi salariale datorate de debitor;
-  FISCALA = ANAF, impozite și taxe locale, alte creanțe bugetare; CHIROGRAFARA = orice altă datorie
-  (facturi, credite, contracte); NECUNOSCUT = nu se poate determina.
-- "incredere" reflectă cât de sigur ești pe câmpurile critice (debitor, CNP, sumă, dosar).
-Încheie apelând trimite_rezultat.""",
+- Use read_document. If the document is scanned you will receive page images: read them visually.
+- Extract the fields exactly as they appear. Never fill in missing or unreadable data: use null and describe the
+  problem in "issues".
+- Validate the CNP (Romanian personal numeric code) with validate_cnp and set cnp_valid. Do not correct the CNP yourself.
+- Classify the claim:
+  CHILD_SUPPORT = child support / maintenance (pensie de întreținere, pensie alimentară);
+  WAGE = wages owed by the debtor; TAX = ANAF, local taxes and other budget claims;
+  UNSECURED = any other debt (invoices, loans, contracts); UNKNOWN = cannot be determined.
+- "confidence" reflects how sure you are about the critical fields (debtor, CNP, amount, case number).
+{LANGUAGE_RULE}
+Finish by calling submit_result.""",
     tools=[
-        Tool("citeste_document", "Extrage textul documentului primit (sau imaginile paginilor dacă e scanat).", NO_INPUT, t_read_document),
-        Tool("valideaza_cnp", "Validează un CNP (structură, dată de naștere, județ, cifră de control).",
-             schema({"cnp": {"type": "string"}}), t_validate_cnp),
+        Tool("read_document", "Extract the text of the received document (or the page images if it is scanned).", NO_INPUT,
+             t_read_document, describe=lambda _: "Reading the received document.",
+             summarize=lambda r: ("Extracted the text layer of the PDF." if isinstance(r, str)
+                                  else "No text layer found (scanned document); reading the page images visually.")),
+        Tool("validate_cnp", "Validate a CNP (structure, birth date, county, check digit).",
+             schema({"cnp": {"type": "string"}}), t_validate_cnp,
+             describe=lambda i: f"Validating CNP {i.get('cnp')}.", summarize=summarize_cnp),
     ],
 )
 
 
-# ====================================================================== Agent Identificare
+# ====================================================================== Identification agent
 
 async def t_search_cnp(_c, inp):
     return await core.search_cnp(inp["cnp"])
@@ -122,87 +179,138 @@ async def t_search_cnps(_c, inp):
 
 
 async def t_search_name(_c, inp):
-    return await core.search_name(inp["nume"])
+    return await core.search_name(inp["name"])
 
 
 async def t_client_details(_c, inp):
     client = await core.client(inp["client_id"])
-    client["cnp_decodat"] = await rules.validate_cnp(client["cnp"])
+    client["decoded_cnp"] = await rules.validate_cnp(client["cnp"])
     return client
 
 
+def describe_identification(r: dict) -> str:
+    status = r.get("status")
+    if status == "IDENTIFIED":
+        text = f"Debtor identified as client {r.get('client_id')} (confidence {pct(r.get('confidence'))})."
+        if r.get("corrected_cnp"):
+            text += f" Corrected CNP: {r['corrected_cnp']}."
+    elif status == "AMBIGUOUS":
+        ids = ", ".join(c["client_id"] for c in r.get("candidates", []))
+        text = f"Ambiguous: {len(r.get('candidates', []))} possible clients ({ids})."
+    else:
+        text = "The debtor is not a client of the bank."
+    return f"{text} {r.get('reasoning', '')}".strip()
+
+
 IDENTIFICATION_SCHEMA = schema({
-    "status": {"type": "string", "enum": ["IDENTIFICAT", "AMBIGUU", "NEGASIT"]},
+    "status": {"type": "string", "enum": ["IDENTIFIED", "AMBIGUOUS", "NOT_FOUND"]},
     "client_id": NULLABLE_STR,
-    "candidati": {"type": "array", "items": schema({"client_id": {"type": "string"}, "motiv": {"type": "string"}})},
-    "cnp_corectat": {**NULLABLE_STR, "description": "CNP-ul corect, dacă cel din document era greșit"},
-    "incredere": {"type": "number"},
-    "motivare": {"type": "string"},
+    "candidates": {"type": "array", "items": schema({"client_id": {"type": "string"}, "reason": {"type": "string"}})},
+    "corrected_cnp": {**NULLABLE_STR, "description": "the correct CNP, if the one in the document was wrong"},
+    "confidence": {"type": "number"},
+    "reasoning": {"type": "string"},
 })
 
-identificare = Agent(
-    key="identificare", label="Agent Identificare", effort=settings.llm_subagent_effort, result_schema=IDENTIFICATION_SCHEMA,
-    system="""Ești AGENTUL DE IDENTIFICARE. Stabilești dacă debitorul din document este client al băncii și care anume.
+identification = Agent(
+    key="identification", label="Identification Agent", effort=settings.llm_subagent_effort, result_schema=IDENTIFICATION_SCHEMA,
+    describe_result=describe_identification,
+    system=f"""You are the IDENTIFICATION AGENT. You determine whether the debtor in the document is a client of the bank, and which one.
 
-Strategie (adapteaz-o situației, nu o urma mecanic):
-1. CNP valid → cauta_dupa_cnp și confirmă că numele se potrivește.
-2. CNP invalid (cifră de control greșită) → sugereaza_corectii_cnp, apoi cauta_dupa_lista_cnp cu candidații;
-   acceptă doar un candidat al cărui nume și adresă se potrivesc cu documentul.
-3. Fără CNP sau fără rezultat → cauta_dupa_nume, apoi compară adresa și data nașterii (detalii_client).
+Strategy (adapt it to the situation, do not follow it mechanically):
+1. Valid CNP: search_by_cnp and confirm the name matches.
+2. Invalid CNP (wrong check digit): suggest_cnp_corrections, then search_by_cnp_list with the candidates;
+   accept only a candidate whose name and address match the document.
+3. No CNP or no result: search_by_name, then compare address and birth date (client_details).
 
-Reguli: nu ghici. Mai mulți candidați plauzibili → AMBIGUU, cu lista candidaților și ce îi diferențiază.
-Nimeni nu se potrivește → NEGASIT. Dacă supervizorul îți transmite o confirmare a operatorului uman,
-verifică clientul confirmat cu detalii_client și raportează IDENTIFICAT.
-Încheie cu trimite_rezultat.""",
+Rules: never guess. Several plausible candidates: AMBIGUOUS, listing the candidates and what tells them apart.
+Nobody matches: NOT_FOUND. If the supervisor passes on a confirmation from the human operator, verify the
+confirmed client with client_details and report IDENTIFIED.
+{LANGUAGE_RULE}
+Finish by calling submit_result.""",
     tools=[
-        Tool("cauta_dupa_cnp", "Caută clientul după CNP exact.", schema({"cnp": {"type": "string"}}), t_search_cnp),
-        Tool("valideaza_cnp", "Validează un CNP.", schema({"cnp": {"type": "string"}}), t_validate_cnp),
-        Tool("sugereaza_corectii_cnp", "Generează CNP-uri valide care diferă printr-o singură cifră sau două cifre inversate.",
-             schema({"cnp": {"type": "string"}}), t_suggest_cnp),
-        Tool("cauta_dupa_lista_cnp", "Caută clienți pentru o listă de CNP-uri.",
-             schema({"cnps": {"type": "array", "items": {"type": "string"}}}), t_search_cnps),
-        Tool("cauta_dupa_nume", "Caută clienți după nume (fără diacritice, ordinea cuvintelor nu contează).",
-             schema({"nume": {"type": "string"}}), t_search_name),
-        Tool("detalii_client", "Detaliile unui client (adresă, conturi, CNP decodat).",
-             schema({"client_id": {"type": "string"}}), t_client_details),
+        Tool("search_by_cnp", "Search the client by exact CNP.", schema({"cnp": {"type": "string"}}), t_search_cnp,
+             describe=lambda i: f"Searching clients by CNP {i.get('cnp')}.", summarize=clients_found),
+        Tool("validate_cnp", "Validate a CNP.", schema({"cnp": {"type": "string"}}), t_validate_cnp,
+             describe=lambda i: f"Validating CNP {i.get('cnp')}.", summarize=summarize_cnp),
+        Tool("suggest_cnp_corrections", "Generate valid CNPs that differ by a single digit or two swapped adjacent digits.",
+             schema({"cnp": {"type": "string"}}), t_suggest_cnp,
+             describe=lambda i: f"Generating possible corrections for CNP {i.get('cnp')}.",
+             summarize=lambda r: f"Found {len(r['candidates'])} valid CNP(s) that differ by one digit or one swap."),
+        Tool("search_by_cnp_list", "Search clients for a list of CNPs.",
+             schema({"cnps": {"type": "array", "items": {"type": "string"}}}), t_search_cnps,
+             describe=lambda i: f"Searching clients for {len(i.get('cnps', []))} candidate CNP(s).", summarize=clients_found),
+        Tool("search_by_name", "Search clients by name (diacritics and word order do not matter).",
+             schema({"name": {"type": "string"}}), t_search_name,
+             describe=lambda i: f"Searching clients by name \"{i.get('name')}\".", summarize=clients_found),
+        Tool("client_details", "Client details (address, accounts, decoded CNP).",
+             schema({"client_id": {"type": "string"}}), t_client_details,
+             describe=lambda i: f"Loading the details of client {i.get('client_id')}.",
+             summarize=lambda c: f"{c['full_name']}, born {c['birth_date']}, {c['address']}; {len(c['accounts'])} account(s)."),
     ],
 )
 
 
-# ====================================================================== Agent Juridic
+# ====================================================================== Legal agent
 
 async def t_check_duplicate(case: Case, _):
-    doc = bb(case, "document", "Documentul nu a fost citit.")
-    if not doc.get("numar_dosar"):
-        raise ToolError("Documentul nu are număr de dosar; verificarea de duplicat nu e posibilă.")
-    found = await core.garnishments_by_case(doc["numar_dosar"])
-    cid = (case.blackboard.get("identificare") or {}).get("client_id")
-    return {"numar_dosar": doc["numar_dosar"], "popriri_gasite": found,
-            "duplicat_activ_acelasi_client": [g["id"] for g in found if g["client_id"] == cid and g["status"] == "ACTIVE"]}
+    doc = bb(case, "document", "The document has not been read yet.")
+    if not doc.get("case_number"):
+        raise ToolError("The document has no case number; the duplicate check is not possible.")
+    found = await core.garnishments_by_case(doc["case_number"])
+    cid = (case.blackboard.get("identification") or {}).get("client_id")
+    return {"case_number": doc["case_number"], "garnishments_found": found,
+            "active_duplicates_same_client": [g["id"] for g in found if g["client_id"] == cid and g["status"] == "ACTIVE"]}
+
+
+def summarize_duplicate(r) -> str:
+    if r["active_duplicates_same_client"]:
+        return f"Already registered and active for this client: {', '.join(r['active_duplicates_same_client'])}."
+    if r["garnishments_found"]:
+        return f"Case number found {len(r['garnishments_found'])} time(s), but not as an active garnishment of this client."
+    return "No existing garnishment with this case number."
 
 
 async def t_financial_snapshot(case: Case, _):
     return await core.snapshot(client_id_of(case))
 
 
+def summarize_snapshot(s) -> str:
+    parts = []
+    for a in s["accounts"]:
+        line = f"{a['product']} ({a['status'].lower()}): balance {money(a['balance'], a['currency'])}"
+        if a["held"]:
+            line += f", already held {money(a['held'], a['currency'])}"
+        if a["inflows"]:
+            line += ", recent credits: " + ", ".join(f"{k.lower().replace('_', ' ')} {money(v, a['currency'])}" for k, v in a["inflows"].items())
+        parts.append(line)
+    return f"{len(s['accounts'])} account(s). " + "; ".join(parts) + "."
+
+
 async def t_active_garnishments(case: Case, _):
     return await core.garnishments(client_id_of(case), status="ACTIVE")
+
+
+def summarize_garnishments(gs) -> str:
+    if not gs:
+        return "No other active garnishments."
+    return "Active: " + "; ".join(f"{g['id']} ({CLAIM_LABEL.get(g['claim_type'], g['claim_type'])}, {money(g['remaining_amount'])}, "
+                                  f"from {g['issuer_name']})" for g in gs) + "."
 
 
 async def t_fx(_c, _):
     return await fx.rates()
 
 
-async def t_find_to_lift(case: Case, _):
-    doc = bb(case, "document", "Documentul nu a fost citit.")
+async def t_find_to_release(case: Case, _):
+    doc = bb(case, "document", "The document has not been read yet.")
     cid = client_id_of(case)
-    refs = [r for r in (doc.get("numar_dosar"), doc.get("referinta_poprire_ridicata")) if r]
+    refs = [r for r in (doc.get("case_number"), doc.get("released_reference")) if r]
     found = {}
     for ref in refs:
         for g in await core.garnishments_by_case(ref):
             found[g["id"]] = g
-    return {"cautat_dupa": refs, "popriri": list(found.values()),
-            "active_ale_clientului": [g["id"] for g in found.values() if g["client_id"] == cid and g["status"] == "ACTIVE"]}
+    return {"searched_for": refs, "garnishments": list(found.values()),
+            "active_for_this_client": [g["id"] for g in found.values() if g["client_id"] == cid and g["status"] == "ACTIVE"]}
 
 
 async def t_allocate(case: Case, inp):
@@ -214,7 +322,7 @@ async def t_allocate(case: Case, inp):
     for a in snap["accounts"]:
         rate = 1.0 if a["currency"] == "RON" else rates.get(a["currency"])
         if rate is None:
-            notes.append(f"Contul {a['iban']} în {a['currency']} nu are curs BNR și a fost exclus.")
+            notes.append(f"Account {a['iban']} in {a['currency']} has no exchange rate and was excluded.")
             continue
         accounts.append({"iban": a["iban"], "currency": a["currency"], "balance": a["balance"], "fx_to_ron": rate,
                          "status": a["status"], "inflows": a["inflows"]})
@@ -223,292 +331,338 @@ async def t_allocate(case: Case, inp):
     garnishments = [{"id": g["id"], "claim_type": g["claim_type"], "amount_ron": g["remaining_amount"],
                      "received_at": g["received_at"]} for g in active]
 
-    include_new = inp.get("include_poprirea_noua", False) and not case.blackboard.get("poprire_inregistrata")
-    claim_type = inp.get("tip_creanta")
+    include_new = inp.get("include_new_order", False) and not case.blackboard.get("registered_garnishment")
+    claim_type = inp.get("claim_type")
     if include_new:
-        doc = bb(case, "document", "Documentul nu a fost citit.")
+        doc = bb(case, "document", "The document has not been read yet.")
         if claim_type not in CLAIM_TYPES:
-            raise ToolError(f"Specifică tip_creanta pentru poprirea nouă (una din {CLAIM_TYPES}).")
-        if not doc.get("suma"):
-            raise ToolError("Documentul nu conține suma de poprit.")
-        currency = (doc.get("moneda") or "RON").upper()
+            raise ToolError(f"Specify claim_type for the new order (one of {CLAIM_TYPES}).")
+        if not doc.get("amount"):
+            raise ToolError("The document does not contain the amount to garnish.")
+        currency = (doc.get("currency") or "RON").upper()
         rate = 1.0 if currency == "RON" else rates.get(currency)
         if rate is None:
-            raise ToolError(f"Nu există curs BNR pentru moneda {currency}.")
-        garnishments.append({"id": "NOU", "claim_type": claim_type, "amount_ron": round(doc["suma"] * rate, 2),
+            raise ToolError(f"No exchange rate for currency {currency}.")
+        garnishments.append({"id": "NEW", "claim_type": claim_type, "amount_ron": round(doc["amount"] * rate, 2),
                              "received_at": datetime.now().isoformat()})
 
     if not accounts:
-        raise ToolError("Clientul nu are conturi utilizabile.")
+        raise ToolError("The client has no usable accounts.")
     plan = await rules.allocate(accounts, garnishments)
-    plan["curs_bnr"] = {"data": fx_data.get("date"), "sursa": fx_data.get("source")}
-    plan["note"] = notes
-    plan["include_poprirea_noua"] = include_new
-    plan["tip_creanta_noua"] = claim_type if include_new else None
-    case.blackboard["plan_blocare"] = plan
+    plan["fx"] = {"date": fx_data.get("date"), "source": fx_data.get("source")}
+    plan["notes"] = notes
+    plan["includes_new_order"] = include_new
+    plan["new_order_claim_type"] = claim_type if include_new else None
+    case.blackboard["allocation_plan"] = plan
     return plan
 
 
+def summarize_plan(p) -> str:
+    lines = [f"Total to hold: {money(p['total_blocked_ron'])}."]
+    for g in p["garnishments"]:
+        name = "The new order" if g["id"] == "NEW" else g["id"]
+        lines.append(f"{name}: {money(g['allocated_ron'])} of {money(g['requested_ron'])}"
+                     + ("" if g["fully_covered"] else f" ({money(g['remaining_ron'])} outstanding)") + ".")
+    return " ".join(lines)
+
+
+def describe_allocate(i) -> str:
+    if i.get("include_new_order"):
+        return f"Running the rules engine to compute what can legally be held, including the new {CLAIM_LABEL.get(i.get('claim_type'), 'order')} order."
+    return "Running the rules engine to re-evaluate the holds for the existing garnishments."
+
+
 LEGAL_SCHEMA = schema({
-    "decizie": {"type": "string", "enum": ["APLICA_POPRIRE", "DUPLICAT", "RIDICARE", "REEVALUARE", "FARA_CONTURI", "NECESITA_OPERATOR"]},
-    "tip_creanta": {"type": ["string", "null"], "enum": CLAIM_TYPES + [None]},
-    "poprire_de_ridicat": NULLABLE_STR,
-    "poprire_duplicat": NULLABLE_STR,
-    "rezumat": {"type": "string", "description": "explicație pentru operator: ce e protejat, ce se blochează și de ce"},
-    "temei_legal": {"type": "array", "items": {"type": "string"}},
+    "decision": {"type": "string", "enum": ["APPLY_GARNISHMENT", "DUPLICATE", "RELEASE", "REEVALUATE", "NO_ACCOUNTS", "NEEDS_OPERATOR"]},
+    "claim_type": {"type": ["string", "null"], "enum": CLAIM_TYPES + [None]},
+    "garnishment_to_release": NULLABLE_STR,
+    "duplicate_of": NULLABLE_STR,
+    "summary": {"type": "string", "description": "plain-English explanation for the operator: what is protected, what is held and why"},
+    "legal_basis": {"type": "array", "items": {"type": "string"}},
 })
 
-juridic = Agent(
-    key="juridic", label="Agent Juridic", effort=settings.llm_effort, result_schema=LEGAL_SCHEMA,
-    system="""Ești AGENTUL JURIDIC. Decizi ce trebuie făcut legal pentru clientul identificat.
-NU calculezi sume: folosești calculeaza_alocare, care apelează un motor de reguli determinist.
+legal = Agent(
+    key="legal", label="Legal Agent", effort=settings.llm_effort, result_schema=LEGAL_SCHEMA,
+    describe_result=lambda r: f"Decision: {DECISION_LABEL.get(r.get('decision'), r.get('decision'))}. {r.get('summary', '')}",
+    system=f"""You are the LEGAL AGENT. You decide what must legally be done for the identified client.
+You do NOT compute amounts: you use compute_allocation, which calls a deterministic rules engine.
 
-- Înființare de poprire: verifica_duplicat (dosar deja activ pentru același client → DUPLICAT, fără alte calcule).
-  Apoi situatie_financiara și popriri_active pentru context. Confirmă tipul creanței (poți corecta clasificarea
-  agentului de citire dacă textul o justifică). Apoi calculeaza_alocare(include_poprirea_noua=true, tip_creanta=...).
-- Ridicare de poprire: gaseste_poprire_de_ridicat. Dacă poprirea aparține clientului și e activă → RIDICARE (cu id).
-- Eveniment de încasare (fără document): calculeaza_alocare(include_poprirea_noua=false) → REEVALUARE.
-- Fără conturi active → FARA_CONTURI. Situație pe care nu o poți încadra → NECESITA_OPERATOR.
+- Garnishment order: check_duplicate (case already active for the same client: DUPLICATE, no further calculation).
+  Then financial_snapshot and active_garnishments for context. Confirm the claim type (you may correct the reader's
+  classification if the text justifies it). Then compute_allocation(include_new_order=true, claim_type=...).
+- Garnishment release: find_garnishment_to_release. If it belongs to the client and is active: RELEASE (with its id).
+- Incoming payment event (no document): compute_allocation(include_new_order=false), then REEVALUATE.
+- No active accounts: NO_ACCOUNTS. A situation you cannot classify: NEEDS_OPERATOR.
 
-În "rezumat", explică pe înțelesul unui operator: sume protejate (alocații, fracțiunea din salariu),
-prioritatea între creditori, ce rămâne neacoperit. Folosește explicațiile returnate de motor.
-Încheie cu trimite_rezultat.""",
+In "summary", explain in plain English for an operator: protected amounts (allowances, the protected share of the
+salary), the ranking between creditors, and what remains uncovered. Use the explanations returned by the engine.
+{LANGUAGE_RULE}
+Finish by calling submit_result.""",
     tools=[
-        Tool("verifica_duplicat", "Caută popriri existente cu același număr de dosar.", NO_INPUT, t_check_duplicate),
-        Tool("situatie_financiara", "Conturile clientului: sold, sume deja blocate, încasări din ultimele 30 de zile pe surse.",
-             NO_INPUT, t_financial_snapshot),
-        Tool("popriri_active", "Popririle active deja înregistrate pentru client.", NO_INPUT, t_active_garnishments),
-        Tool("curs_bnr", "Cursurile oficiale BNR ale zilei.", NO_INPUT, t_fx),
-        Tool("gaseste_poprire_de_ridicat", "Găsește poprirea vizată de o adresă de ridicare.", NO_INPUT, t_find_to_lift),
-        Tool("calculeaza_alocare",
-             "Calculează (determinist) planul de blocare pentru TOATE popririle active ale clientului, opțional plus cea nouă din document.",
-             schema({"include_poprirea_noua": {"type": "boolean"},
-                     "tip_creanta": {"type": ["string", "null"], "enum": CLAIM_TYPES + [None]}}), t_allocate),
+        Tool("check_duplicate", "Look for existing garnishments with the same case number.", NO_INPUT, t_check_duplicate,
+             describe=lambda _: "Checking whether this case number is already registered.", summarize=summarize_duplicate),
+        Tool("financial_snapshot", "The client's accounts: balance, amounts already held, credits of the last 30 days by source.",
+             NO_INPUT, t_financial_snapshot,
+             describe=lambda _: "Loading the client's accounts, balances and recent credits.", summarize=summarize_snapshot),
+        Tool("active_garnishments", "Active garnishments already registered for the client.", NO_INPUT, t_active_garnishments,
+             describe=lambda _: "Loading the client's active garnishments.", summarize=summarize_garnishments),
+        Tool("exchange_rates", "Official exchange rates of the day.", NO_INPUT, t_fx,
+             describe=lambda _: "Fetching the official exchange rates.",
+             summarize=lambda r: f"1 EUR = {r['rates'].get('EUR')} RON on {r.get('date')} (source: {r.get('source')})."),
+        Tool("find_garnishment_to_release", "Find the garnishment referenced by a release letter.", NO_INPUT, t_find_to_release,
+             describe=lambda _: "Looking up the garnishment referenced by the release letter.",
+             summarize=lambda r: (f"Matching active garnishment(s) of this client: {', '.join(r['active_for_this_client'])}."
+                                  if r["active_for_this_client"] else "No matching active garnishment found for this client.")),
+        Tool("compute_allocation",
+             "Compute (deterministically) the hold plan for ALL active garnishments of the client, optionally plus the new one from the document.",
+             schema({"include_new_order": {"type": "boolean"},
+                     "claim_type": {"type": ["string", "null"], "enum": CLAIM_TYPES + [None]}}), t_allocate,
+             describe=describe_allocate, summarize=summarize_plan),
     ],
 )
 
 
-# ====================================================================== Agent Acțiune
+# ====================================================================== Action agent
 
 async def t_register(case: Case, _):
-    if case.blackboard.get("poprire_inregistrata"):
-        return {"deja_inregistrata": case.blackboard["poprire_inregistrata"]}
-    doc = bb(case, "document", "Documentul nu a fost citit.")
-    legal = bb(case, "juridic", "Agentul juridic nu a decis încă.")
-    if legal.get("decizie") != "APLICA_POPRIRE":
-        raise ToolError(f"Decizia juridică este {legal.get('decizie')}, nu APLICA_POPRIRE.")
-    plan = bb(case, "plan_blocare", "Nu există plan de blocare calculat.")
-    new = next((g for g in plan["garnishments"] if g["id"] == "NOU"), None)
+    if case.blackboard.get("registered_garnishment"):
+        return {"already_registered": case.blackboard["registered_garnishment"]}
+    doc = bb(case, "document", "The document has not been read yet.")
+    decision = bb(case, "legal", "The legal agent has not decided yet.")
+    if decision.get("decision") != "APPLY_GARNISHMENT":
+        raise ToolError(f"The legal decision is {decision.get('decision')}, not APPLY_GARNISHMENT.")
+    plan = bb(case, "allocation_plan", "No hold plan has been computed.")
+    new = next((g for g in plan["garnishments"] if g["id"] == "NEW"), None)
     if new is None:
-        raise ToolError("Planul de blocare nu include poprirea nouă; cere recalcularea.")
+        raise ToolError("The hold plan does not include the new order; ask for it to be recomputed.")
     g = await core.create_garnishment({
-        "client_id": client_id_of(case), "case_ref": doc["numar_dosar"] or doc.get("numar_inregistrare") or case.id,
-        "issuer_type": doc["emitent_tip"], "issuer_name": doc["emitent_nume"], "creditor": doc.get("creditor") or "-",
-        "claim_type": plan["tip_creanta_noua"], "total_amount": new["requested_ron"], "document_ref": case.id,
+        "client_id": client_id_of(case), "case_ref": doc["case_number"] or doc.get("registration_number") or case.id,
+        "issuer_type": doc["issuer_type"], "issuer_name": doc["issuer_name"], "creditor": doc.get("creditor") or "-",
+        "claim_type": plan["new_order_claim_type"], "total_amount": new["requested_ron"], "document_ref": case.id,
     })
-    case.blackboard["poprire_inregistrata"] = g
+    case.blackboard["registered_garnishment"] = g
     return g
 
 
 async def t_apply_plan(case: Case, _):
-    plan = bb(case, "plan_blocare", "Nu există plan de blocare calculat.")
-    registered = case.blackboard.get("poprire_inregistrata")
+    plan = bb(case, "allocation_plan", "No hold plan has been computed.")
+    registered = case.blackboard.get("registered_garnishment")
     holds = []
     for h in plan["holds"]:
         gid = h["garnishment_id"]
-        if gid == "NOU":
+        if gid == "NEW":
             if not registered:
-                raise ToolError("Planul conține poprirea nouă: înregistreaz-o întâi (inregistreaza_poprirea).")
+                raise ToolError("The plan contains the new order: register it first (register_garnishment).")
             gid = registered["id"]
         if h["amount"] > 0:
             holds.append({"iban": h["iban"], "garnishment_id": gid, "amount": h["amount"], "amount_ron": h["amount_ron"]})
     result = await core.replace_holds(client_id_of(case), holds)
-    case.blackboard["blocari_aplicate"] = {"total_ron": plan["total_blocked_ron"], **result}
+    case.blackboard["applied_holds"] = {"total_ron": plan["total_blocked_ron"], **result}
     return result
 
 
-async def t_lift(case: Case, inp):
-    result = await core.lift_garnishment(inp["id_poprire"])
-    case.blackboard["ridicare"] = result
+async def t_release(case: Case, inp):
+    result = await core.lift_garnishment(inp["garnishment_id"])
+    case.blackboard["release"] = result
     return result
 
 
-def _fmt(x: float) -> str:
+def _ro_amount(x: float) -> str:
     return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 async def t_letter(case: Case, inp):
-    if case.kind == "EVENIMENT":
-        raise ToolError("Pentru evenimente de încasare nu se trimite scrisoare emitentului.")
-    doc = bb(case, "document", "Documentul nu a fost citit.")
-    kind, note = inp["tip"], inp.get("nota_suplimentara")
-    adresa = f"adresa dumneavoastră nr. {doc.get('numar_inregistrare') or '-'}"
-    dosar = doc.get("numar_dosar") or "-"
-    ident = case.blackboard.get("identificare") or {}
-    cnp = ident.get("cnp_corectat") or doc.get("debitor_cnp")
+    """Builds the official reply. It is addressed to a Romanian authority, so the letter itself is in Romanian."""
+    if case.kind == "EVENT":
+        raise ToolError("No letter is sent to the issuer for incoming payment events.")
+    doc = bb(case, "document", "The document has not been read yet.")
+    kind, note = inp["letter_type"], inp.get("extra_note_ro")
+    ref_letter = f"adresa dumneavoastră nr. {doc.get('registration_number') or '-'}"
+    case_no = doc.get("case_number") or "-"
+    ident = case.blackboard.get("identification") or {}
+    cnp = ident.get("corrected_cnp") or doc.get("debtor_cnp")
     holds_lines, paragraphs = [], []
 
-    if kind == "CONFIRMARE_POPRIRE":
-        applied = bb(case, "blocari_aplicate", "Blocările nu au fost aplicate încă.")
-        plan = case.blackboard["plan_blocare"]
-        registered = case.blackboard.get("poprire_inregistrata") or {}
+    if kind == "GARNISHMENT_CONFIRMATION":
+        applied = bb(case, "applied_holds", "The holds have not been applied yet.")
+        plan = case.blackboard["allocation_plan"]
+        registered = case.blackboard.get("registered_garnishment") or {}
         mine = [h for h in applied["holds"] if h["garnishment_id"] == registered.get("id")]
         holds_lines = [{"iban": h["iban"], "currency": next((a["currency"] for a in plan["accounts"] if a["iban"] == h["iban"]), "RON"),
                         "amount": h["amount"]} for h in mine]
         total = sum(h["amount_ron"] for h in mine)
-        new = next((g for g in plan["garnishments"] if g["id"] == "NOU"), {})
-        paragraphs = [f"Ca răspuns la {adresa} privind înființarea popririi în dosarul nr. {dosar}, vă comunicăm că debitorul "
+        new = next((g for g in plan["garnishments"] if g["id"] == "NEW"), {})
+        paragraphs = [f"Ca răspuns la {ref_letter} privind înființarea popririi în dosarul nr. {case_no}, vă comunicăm că debitorul "
                       f"figurează în evidențele băncii și că poprirea a fost înregistrată sub nr. {registered.get('id', '-')}."]
         if total > 0:
-            paragraphs.append(f"Au fost indisponibilizate sumele de mai jos, în total {_fmt(total)} lei (echivalent).")
+            paragraphs.append(f"Au fost indisponibilizate sumele de mai jos, în total {_ro_amount(total)} lei (echivalent).")
         else:
             paragraphs.append("La data prezentei, conturile debitorului nu prezintă sume urmăribile disponibile.")
         if new.get("remaining_ron", 0) > 0:
-            paragraphs.append(f"Diferența de {_fmt(new['remaining_ron'])} lei va fi indisponibilizată din încasările viitoare, "
+            paragraphs.append(f"Diferența de {_ro_amount(new['remaining_ron'])} lei va fi indisponibilizată din încasările viitoare, "
                               "în limitele prevăzute de lege, până la concurența sumei din adresă.")
         paragraphs.append("Au fost aplicate limitele legale privind sumele exceptate de la urmărire și fracțiunea urmăribilă "
                           "din veniturile periodice, precum și ordinea de preferință a creanțelor.")
         subject = "CONFIRMARE ÎNFIINȚARE POPRIRE"
-    elif kind == "NU_DETINE_CONTURI":
-        paragraphs = [f"Ca răspuns la {adresa} în dosarul nr. {dosar}, vă comunicăm că persoana {doc.get('debitor_nume') or '-'}"
+    elif kind == "NO_ACCOUNTS":
+        paragraphs = [f"Ca răspuns la {ref_letter} în dosarul nr. {case_no}, vă comunicăm că persoana {doc.get('debtor_name') or '-'}"
                       f"{f', CNP {cnp},' if cnp else ''} nu figurează în evidențele băncii ca titular de conturi active.",
                       "Pe cale de consecință, nu au fost indisponibilizate sume."]
         subject = "RĂSPUNS LA ADRESA DE POPRIRE – DEBITORUL NU DEȚINE CONTURI"
-    elif kind == "CONFIRMARE_RIDICARE":
-        lift = bb(case, "ridicare", "Poprirea nu a fost ridicată încă.")
+    elif kind == "RELEASE_CONFIRMATION":
+        lift = bb(case, "release", "The garnishment has not been released yet.")
         released = sum(h["amount"] for h in lift["released_holds"])
-        paragraphs = [f"Urmare {adresa}, vă confirmăm ridicarea popririi {lift['garnishment']['id']} înființate în dosarul "
+        paragraphs = [f"Urmare {ref_letter}, vă confirmăm ridicarea popririi {lift['garnishment']['id']} înființate în dosarul "
                       f"nr. {lift['garnishment']['case_ref']}.",
-                      f"Au fost deblocate sume în total de {_fmt(released)} (moneda contului), iar conturile debitorului nu mai sunt indisponibilizate pentru acest dosar."]
+                      f"Au fost deblocate sume în total de {_ro_amount(released)} (moneda contului), iar conturile debitorului nu mai sunt "
+                      "indisponibilizate pentru acest dosar."]
         subject = "CONFIRMARE RIDICARE POPRIRE"
-    elif kind == "INFORMARE_DUPLICAT":
-        legal = case.blackboard.get("juridic") or {}
-        paragraphs = [f"Vă informăm că {adresa} în dosarul nr. {dosar} a fost deja înregistrată anterior "
-                      f"(poprirea {legal.get('poprire_duplicat') or '-'}) și se află în executare.",
+    elif kind == "DUPLICATE_NOTICE":
+        decision = case.blackboard.get("legal") or {}
+        paragraphs = [f"Vă informăm că {ref_letter} în dosarul nr. {case_no} a fost deja înregistrată anterior "
+                      f"(poprirea {decision.get('duplicate_of') or '-'}) și se află în executare.",
                       "Nu au fost efectuate indisponibilizări suplimentare în baza acestui exemplar."]
         subject = "INFORMARE – ADRESĂ DE POPRIRE DEJA ÎNREGISTRATĂ"
     else:
-        raise ToolError(f"Tip de scrisoare necunoscut: {kind}")
+        raise ToolError(f"Unknown letter type: {kind}")
 
     if note:
         paragraphs.append(note)
     reference = f"EXS-{case.id}"
     pdf = await docs.render_letter({
-        "bank_name": settings.bank_name, "reference": reference, "recipient": doc.get("emitent_nume") or "-",
-        "case_ref": dosar, "debtor_name": doc.get("debitor_nume") or "-", "debtor_cnp": cnp, "subject": subject,
+        "bank_name": settings.bank_name, "reference": reference, "recipient": doc.get("issuer_name") or "-",
+        "case_ref": case_no, "debtor_name": doc.get("debtor_name") or "-", "debtor_cnp": cnp, "subject": subject,
         "paragraphs": paragraphs, "holds": holds_lines,
     })
     case.response_pdf = pdf
-    case.blackboard["scrisoare"] = {"tip": kind, "referinta": reference, "destinatar": doc.get("emitent_nume"), "paragrafe": paragraphs}
-    return {"generat": True, "referinta": reference, "tip": kind, "paragrafe": paragraphs}
+    case.blackboard["letter"] = {"type": kind, "reference": reference, "recipient": doc.get("issuer_name"), "language": "Romanian",
+                                 "holds": holds_lines}
+    return {"generated": True, "reference": reference, "type": kind,
+            "note": "Official letter generated in Romanian (it is addressed to a Romanian authority)."}
 
 
 ACTION_SCHEMA = schema({
-    "actiuni_efectuate": {"type": "array", "items": {"type": "string"}},
-    "scrisoare_generata": {"type": "boolean"},
-    "probleme": {"type": "array", "items": {"type": "string"}},
-    "rezumat": {"type": "string"},
+    "actions_taken": {"type": "array", "items": {"type": "string"}},
+    "letter_generated": {"type": "boolean"},
+    "issues": {"type": "array", "items": {"type": "string"}},
+    "summary": {"type": "string"},
 })
 
-actiune = Agent(
-    key="actiuni", label="Agent Acțiune", effort=settings.llm_subagent_effort, result_schema=ACTION_SCHEMA,
-    system="""Ești AGENTUL DE ACȚIUNE. Execuți în core banking decizia agentului juridic și răspunzi emitentului.
-Nu modifici și nu inventezi sume: aplici exact planul calculat de motorul de reguli.
+action = Agent(
+    key="actions", label="Action Agent", effort=settings.llm_subagent_effort, result_schema=ACTION_SCHEMA,
+    describe_result=lambda r: r.get("summary", "") + (" Issues: " + "; ".join(r["issues"]) if r.get("issues") else ""),
+    system=f"""You are the ACTION AGENT. You execute the legal agent's decision in core banking and reply to the issuer.
+You never change or invent amounts: you apply exactly the plan computed by the rules engine.
 
-- APLICA_POPRIRE: inregistreaza_poprirea → aplica_planul_de_blocare → genereaza_raspuns(CONFIRMARE_POPRIRE)
-- REEVALUARE (eveniment de încasare): aplica_planul_de_blocare; fără scrisoare.
-- RIDICARE: ridica_poprirea(id) → genereaza_raspuns(CONFIRMARE_RIDICARE)
-- DUPLICAT: nu modifici nimic; genereaza_raspuns(INFORMARE_DUPLICAT)
-- Debitor care nu e client / fără conturi: genereaza_raspuns(NU_DETINE_CONTURI)
+- APPLY_GARNISHMENT: register_garnishment, then apply_hold_plan, then generate_response_letter(GARNISHMENT_CONFIRMATION)
+- REEVALUATE (incoming payment event): apply_hold_plan; no letter.
+- RELEASE: release_garnishment(id), then generate_response_letter(RELEASE_CONFIRMATION)
+- DUPLICATE: change nothing; generate_response_letter(DUPLICATE_NOTICE)
+- Debtor not a client / no accounts: generate_response_letter(NO_ACCOUNTS)
 
-Dacă o operațiune eșuează, citește eroarea și corectează dacă se poate, altfel raportează problema.
-Poți adăuga în scrisoare o notă scurtă (nota_suplimentara), doar dacă aduce o informație utilă emitentului.
-Încheie cu trimite_rezultat.""",
+If an operation fails, read the error and fix it if you can, otherwise report the problem.
+The letter is official and written in Romanian. You may add a short extra_note_ro (in Romanian) only if it gives
+the issuer useful information.
+{LANGUAGE_RULE}
+Finish by calling submit_result.""",
     tools=[
-        Tool("inregistreaza_poprirea", "Înregistrează poprirea nouă în core banking (din datele documentului și decizia juridică).",
-             NO_INPUT, t_register),
-        Tool("aplica_planul_de_blocare", "Aplică atomic planul de blocare calculat (înlocuiește blocările active ale clientului).",
-             NO_INPUT, t_apply_plan),
-        Tool("ridica_poprirea", "Ridică o poprire și deblochează sumele.", schema({"id_poprire": {"type": "string"}}), t_lift),
-        Tool("genereaza_raspuns", "Generează scrisoarea oficială de răspuns către emitent (PDF).",
-             schema({"tip": {"type": "string", "enum": ["CONFIRMARE_POPRIRE", "NU_DETINE_CONTURI", "CONFIRMARE_RIDICARE", "INFORMARE_DUPLICAT"]},
-                     "nota_suplimentara": NULLABLE_STR}), t_letter),
+        Tool("register_garnishment", "Register the new garnishment in core banking (from the document data and the legal decision).",
+             NO_INPUT, t_register, describe=lambda _: "Registering the new garnishment in core banking.",
+             summarize=lambda r: (f"Already registered as {r['already_registered']['id']}." if "already_registered" in r
+                                  else f"Registered as {r['id']}.")),
+        Tool("apply_hold_plan", "Atomically apply the computed hold plan (replaces the client's active holds).",
+             NO_INPUT, t_apply_plan, describe=lambda _: "Applying the hold plan in core banking.",
+             summarize=lambda r: f"{r['created']} hold(s) created, {r['released']} previous hold(s) released."),
+        Tool("release_garnishment", "Release a garnishment and unblock its amounts.", schema({"garnishment_id": {"type": "string"}}),
+             t_release, describe=lambda i: f"Releasing garnishment {i.get('garnishment_id')}.",
+             summarize=lambda r: f"Garnishment {r['garnishment']['id']} released; {len(r['released_holds'])} hold(s) unblocked."),
+        Tool("generate_response_letter", "Generate the official reply letter to the issuer (PDF, in Romanian).",
+             schema({"letter_type": {"type": "string", "enum": list(LETTER_LABEL)},
+                     "extra_note_ro": {**NULLABLE_STR, "description": "optional extra paragraph, in Romanian"}}), t_letter,
+             describe=lambda i: f"Generating the official reply letter ({LETTER_LABEL.get(i.get('letter_type'), 'reply')}).",
+             summarize=lambda r: f"Letter {r['reference']} generated (in Romanian, addressed to the issuer)."),
     ],
 )
 
 
-# ====================================================================== Supervizor
+# ====================================================================== Supervisor
 
-SUB_AGENTS = {"agent_citire": citire, "agent_identificare": identificare, "agent_juridic": juridic, "agent_actiune": actiune}
+SUB_AGENTS = {"reader_agent": reader, "identification_agent": identification, "legal_agent": legal, "action_agent": action}
 
 
 def delegate(agent: Agent):
     async def handler(case: Case, inp):
-        instructions = inp.get("instructiuni") or ""
-        emit(case, agent.label, "agent_start", instructions=instructions)
-        task = (f"Caz {case.id} ({case.kind}).\n\nInstrucțiuni de la supervizor:\n{instructions}\n\n"
-                f"Datele curente ale cazului (blackboard):\n```json\n{blackboard_view(case)}\n```")
+        instructions = inp.get("instructions") or ""
+        emit(case, agent.label, "agent_start", text=f"{agent.label} started working.")
+        task = (f"Case {case.id} ({case.kind}).\n\nInstructions from the supervisor:\n{instructions}\n\n"
+                f"Current case data (blackboard):\n```json\n{blackboard_view(case)}\n```")
         try:
             result = await agent.run(case, task)
         except AgentError as e:
-            emit(case, agent.label, "error", message=str(e))
-            raise ToolError(f"{agent.label} nu a putut finaliza sarcina: {e}")
+            emit(case, agent.label, "error", text=str(e))
+            raise ToolError(f"{agent.label} could not finish the task: {e}")
         case.blackboard[agent.key] = result
-        emit(case, agent.label, "agent_result", result=result)
+        emit(case, agent.label, "agent_result", result=result,
+             text=agent.describe_result(result) if agent.describe_result else "Result submitted.")
         return result
     return handler
 
 
 async def t_ask_human(case: Case, inp):
-    raise PauseForHuman(inp["intrebare"], inp.get("optiuni") or [], inp.get("context") or "")
+    raise PauseForHuman(inp["question"], inp.get("options") or [], inp.get("context") or "")
 
 
-OUTCOMES = ["POPRIRE_APLICATA_INTEGRAL", "POPRIRE_APLICATA_PARTIAL", "FARA_FONDURI", "DEBITOR_NECLIENT", "DUPLICAT",
-            "POPRIRE_RIDICATA", "REEVALUARE_APLICATA", "RESPINS_DE_OPERATOR", "DOCUMENT_NEPROCESABIL"]
+OUTCOMES = ["GARNISHMENT_APPLIED_FULL", "GARNISHMENT_APPLIED_PARTIAL", "NO_FUNDS", "DEBTOR_NOT_CLIENT", "DUPLICATE",
+            "GARNISHMENT_RELEASED", "REEVALUATION_APPLIED", "REJECTED_BY_OPERATOR", "DOCUMENT_NOT_PROCESSABLE"]
 
-CLOSE_SCHEMA = schema({"rezultat": {"type": "string", "enum": OUTCOMES}, "rezumat": {"type": "string"}})
+CLOSE_SCHEMA = schema({"outcome": {"type": "string", "enum": OUTCOMES}, "summary": {"type": "string"}})
 
 supervisor = Agent(
-    key="supervizor", label="Supervizor", effort=settings.llm_effort, result_schema=CLOSE_SCHEMA, terminal_tool="inchide_caz",
+    key="supervisor", label="Supervisor", effort=settings.llm_effort, result_schema=CLOSE_SCHEMA, terminal_tool="close_case",
     max_turns=20,
-    system=f"""Ești SUPERVIZORUL unui sistem multi-agent care procesează automat adresele de poprire primite de
-{settings.bank_name}, în calitate de terț poprit. Coordonezi o echipă de agenți specializați:
+    system=f"""You are the SUPERVISOR of a multi-agent system that automatically processes garnishment orders
+(popriri) received by {settings.bank_name}, a Romanian bank acting as garnishee. You coordinate specialised agents:
 
-- agent_citire: citește documentul și extrage datele structurate.
-- agent_identificare: identifică debitorul printre clienții băncii.
-- agent_juridic: verifică duplicatele și calculează, prin motorul de reguli determinist, ce se poate bloca legal.
-- agent_actiune: înregistrează poprirea, aplică blocările, ridică popriri, generează răspunsul către emitent.
-- intreaba_operator: pune o întrebare unui operator uman; cazul intră în pauză până la răspuns.
-- inchide_caz: închide cazul cu rezultatul final.
+- reader_agent: reads the document and extracts structured data.
+- identification_agent: identifies the debtor among the bank's clients.
+- legal_agent: checks for duplicates and computes, through the deterministic rules engine, what can legally be held.
+- action_agent: registers the garnishment, applies holds, releases garnishments, generates the reply to the issuer.
+- ask_operator: asks a human operator a question; the case pauses until they answer.
+- close_case: closes the case with its final outcome.
 
-Cum lucrezi:
-- Tu decizi pașii în funcție de situație; nu urma orbește un flux fix. Citește critic fiecare rezultat primit.
-- Datele cazului (blackboard) sunt vizibile tuturor agenților. Dă-le instrucțiuni clare și semnalează suspiciunile.
-- Nu inventa și nu calcula sume. Sumele vin doar din motorul de reguli, prin agent_juridic.
-- Escaladează la operator DOAR când identificarea e AMBIGUU sau are încredere sub 0,8, când câmpuri critice ale
-  documentului (debitor, sumă, dosar) sunt ilizibile, sau când o unealtă eșuează repetat. Oferă opțiuni concrete.
-- Nu escalada pentru încadrări pe care sistemul le stabilește deja: sursa tranzacțiilor (SALARIU, PENSIE, ALOCATIE,
-  TRANSFER etc.) este etichetată de core banking și este autoritativă, iar planul motorului de reguli e cel aplicat.
-- Debitor NEGASIT → agent_actiune generează răspunsul NU_DETINE_CONTURI, apoi închizi ca DEBITOR_NECLIENT.
-- Document care nu e poprire sau ridicare de poprire → nu executa nimic; închide ca DOCUMENT_NEPROCESABIL.
-- Caz de tip EVENIMENT (încasare nouă la un debitor cu popriri active): nu există document; clientul e deja
-  identificat. Cere agentului juridic reevaluarea, apoi agentului de acțiune aplicarea planului.
-- Înainte de a închide un caz cu document, asigură-te că emitentul a primit răspuns (scrisoarea generată).
-- Înainte de fiecare delegare, scrie o frază scurtă în română despre ce faci și de ce. Este afișată live.""",
+How you work:
+- You decide the steps based on the situation; do not blindly follow a fixed pipeline. Read every result critically.
+- The case data (blackboard) is visible to all agents. Give them clear instructions and flag anything suspicious.
+- Never invent or compute amounts. Amounts only come from the rules engine, through legal_agent.
+- Ask the operator ONLY when identification is AMBIGUOUS or below 0.8 confidence, when critical fields of the
+  document (debtor, amount, case number) are unreadable, or when a tool fails repeatedly. Offer concrete options,
+  each one a short, self-contained sentence (for example "CL005 - Andrei Popa, Str. Florilor nr. 12").
+- Do not ask about things the system already decides: transaction sources (SALARY, PENSION, CHILD_ALLOWANCE,
+  TRANSFER, ...) are labelled by core banking and are authoritative, and the rules engine's plan is the one applied.
+- Debtor NOT_FOUND: action_agent generates the NO_ACCOUNTS reply, then close as DEBTOR_NOT_CLIENT.
+- A document that is neither a garnishment order nor a release: execute nothing; close as DOCUMENT_NOT_PROCESSABLE.
+- EVENT case (new incoming payment for a debtor with active garnishments): there is no document and the client is
+  already identified. Ask legal_agent to re-evaluate, then action_agent to apply the plan.
+- Before closing a case that has a document, make sure the issuer got a reply (letter generated).
+- Before each delegation, write one short sentence saying what you are doing and why. It is shown live to operators.
+{LANGUAGE_RULE}""",
     tools=[
-        *[Tool(name, f"Deleagă o sarcină către {a.label}. Rezultatul lui se salvează în blackboard.",
-               schema({"instructiuni": {"type": "string"}}), delegate(a)) for name, a in SUB_AGENTS.items()],
-        Tool("intreaba_operator", "Pune o întrebare unui operator uman și așteaptă răspunsul (cazul intră în pauză).",
-             schema({"intrebare": {"type": "string"}, "optiuni": {"type": "array", "items": {"type": "string"}},
-                     "context": {"type": "string"}}), t_ask_human),
+        *[Tool(name, f"Delegate a task to the {a.label}. Its result is saved on the blackboard.",
+               schema({"instructions": {"type": "string"}}), delegate(a),
+               describe=(lambda label: lambda i: f"Assigns a task to the {label}: {i.get('instructions', '')}")(a.label),
+               quiet=True) for name, a in SUB_AGENTS.items()],
+        Tool("ask_operator", "Ask a human operator a question and wait for the answer (the case pauses).",
+             schema({"question": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}},
+                     "context": {"type": "string"}}), t_ask_human,
+             describe=lambda _: "Pauses the case to ask a human operator for a decision."),
     ],
 )
 
 
 def start_message(case: Case) -> str:
-    if case.kind == "EVENIMENT":
+    if case.kind == "EVENT":
         t = case.trigger
-        return (f"Caz nou {case.id} de tip EVENIMENT: în contul {t['iban']} al clientului {t['client_id']} a intrat suma de "
-                f"{t['amount']} {t['currency']} (sursa: {t['source']}). Clientul are popriri active. Reevaluează blocările.")
-    return (f"Caz nou {case.id}: pe canalul de executări silite a sosit documentul „{case.document_name}”. "
-            "Procesează-l de la cap la coadă.")
+        return (f"New case {case.id} of type EVENT: account {t['iban']} of client {t['client_id']} received "
+                f"{t['amount']} {t['currency']} (source: {t['source']}). The client has active garnishments. Re-evaluate the holds.")
+    return (f"New case {case.id}: the document \"{case.document_name}\" arrived on the enforcement channel. "
+            "Process it end to end.")

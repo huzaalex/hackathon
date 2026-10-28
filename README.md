@@ -1,10 +1,10 @@
-# Poprire Agent
+# Garnishment Agent
 
 **Procesarea autonomă a adreselor de poprire într-o bancă** · Hackathon „Agenți AI în Servicii Bancare” · Direcția 2: *AI for Operational Efficiency*
 
 Băncile primesc zilnic adrese de poprire de la executori judecătorești, ANAF și primării, ca PDF-uri în formate diferite, uneori scanate. Azi, un operator le citește manual, caută debitorul, calculează ce sume au voie să fie blocate (alocațiile sunt protejate, din salariu se ia doar o fracție, unele datorii au prioritate), blochează banii și răspunde emitentului.
 
-**Poprire Agent** face acest lucru cu o echipă de agenți AI coordonată de un supervizor. Calculele legale sunt făcute de un motor de reguli determinist, iar un operator uman intervine doar când agentul nu e sigur.
+**Garnishment Agent** face acest lucru cu o echipă de agenți AI coordonată de un supervizor. Calculele legale sunt făcute de un motor de reguli determinist, iar un operator uman intervine doar când agentul nu e sigur.
 
 ---
 
@@ -80,7 +80,7 @@ La fiecare `docker compose up`, `data-generator` regenerează datele sintetice �
 
 ## Scenarii de demo
 
-Le găsiți în dashboard, în stânga, cu butonul ▶. PDF-urile sunt în `./data/popriri/`.
+Le găsiți în dashboard, în stânga, cu butonul Run. PDF-urile sunt în `./data/popriri/`.
 
 | # | Scenariu | Ce demonstrează |
 |---|---|---|
@@ -92,11 +92,11 @@ Le găsiți în dashboard, în stânga, cu butonul ▶. PDF-urile sunt în `./da
 | 06 | Ridicare de poprire | Alt tip de document → alt flux (deblocare) |
 | 07 | Debitorul nu e client | Răspuns „nu deține conturi” |
 | 08 | Primărie, cont în EUR | Curs BNR real, conversie |
-| 09 | Fonduri insuficiente | Blocare parțială, apoi **Simulează încasare** salariu → agentul se reactivează singur |
+| 09 | Fonduri insuficiente | Blocare parțială, apoi **Simulate an incoming payment** (salariu) → agentul se reactivează singur |
 | 10 | Document scanat | Fără strat de text → citire vizuală (imagine) |
 | 11 | Duplicat primit pe e-mail | Rulați-l după 01: nu blochează de două ori |
 
-**Ordine recomandată la stand (~5 minute):** 01 → 03 → 05 (răspundeți ca operator) → 09 + simulare salariu → 10. Țineți deschis tab-ul „Client & conturi” ca să se vadă cum se schimbă blocările.
+**Ordine recomandată la stand (~5 minute):** 01 → 03 → 05 (răspundeți ca operator) → 09 + simulare salariu → 10. Țineți deschis tab-ul „Client & accounts” ca să se vadă cum se schimbă blocările.
 
 ---
 

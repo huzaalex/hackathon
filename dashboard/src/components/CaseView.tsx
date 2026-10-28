@@ -26,7 +26,7 @@ export default function CaseView({ caseId }: { caseId: string }) {
     return () => es.close();
   }, [caseId]);
 
-  if (!detail) return <p className="muted">Se încarcă…</p>;
+  if (!detail) return <p className="muted">Loading…</p>;
 
   return (
     <div className="case-view">
@@ -39,39 +39,39 @@ export default function CaseView({ caseId }: { caseId: string }) {
             <span className={`badge ${detail.status}`}>{STATUS_LABEL[detail.status]}</span>
             {detail.outcome && <span className="pill outcome">{OUTCOME_LABEL[detail.outcome] ?? detail.outcome}</span>}
             <span className="muted small">
-              {detail.usage.llm_calls} apeluri LLM · {detail.usage.input_tokens.toLocaleString("ro-RO")} /{" "}
-              {detail.usage.output_tokens.toLocaleString("ro-RO")} tokeni
+              {detail.usage.llm_calls} LLM calls · {detail.usage.input_tokens.toLocaleString("en-GB")} input /{" "}
+              {detail.usage.output_tokens.toLocaleString("en-GB")} output tokens
             </span>
           </div>
         </div>
         <div className="actions">
           {detail.has_document && (
             <a className="btn ghost" href={`/api/cases/${detail.id}/document`} target="_blank" rel="noreferrer">
-              Document primit
+              Original document
             </a>
           )}
           {detail.has_response_pdf && (
             <a className="btn" href={`/api/cases/${detail.id}/response.pdf`} target="_blank" rel="noreferrer">
-              Răspuns generat (PDF)
+              Reply letter (PDF)
             </a>
           )}
         </div>
       </div>
 
       {detail.summary && <div className="summary">{detail.summary}</div>}
-      {detail.status === "NECESITA_OPERATOR" && detail.review && (
+      {detail.status === "NEEDS_REVIEW" && detail.review && (
         <ReviewPanel caseId={detail.id} review={detail.review} onAnswered={() => api.caseDetail(caseId).then(setDetail)} />
       )}
 
       <nav className="tabs">
-        <button className={tab === "trace" ? "on" : ""} onClick={() => setTab("trace")}>Gândirea agenților</button>
-        <button className={tab === "data" ? "on" : ""} onClick={() => setTab("data")}>Date & decizii</button>
+        <button className={tab === "trace" ? "on" : ""} onClick={() => setTab("trace")}>Agent reasoning</button>
+        <button className={tab === "data" ? "on" : ""} onClick={() => setTab("data")}>Data &amp; decisions</button>
         <button className={tab === "client" ? "on" : ""} onClick={() => setTab("client")} disabled={!detail.client_id}>
-          Client & conturi
+          Client &amp; accounts
         </button>
       </nav>
 
-      {tab === "trace" && <Trace events={events} running={detail.status === "IN_LUCRU"} />}
+      {tab === "trace" && <Trace events={events} running={detail.status === "RUNNING"} />}
       {tab === "data" && <Blackboard data={detail.blackboard} />}
       {tab === "client" && detail.client_id && <ClientPanel clientId={detail.client_id} version={events.length} />}
     </div>

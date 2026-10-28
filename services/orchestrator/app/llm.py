@@ -11,7 +11,7 @@ def client() -> anthropic.AsyncAnthropic:
     global _client
     if _client is None:
         if not settings.bedrock_api_key:
-            raise RuntimeError("BEDROCK_API_KEY lipsește din .env")
+            raise RuntimeError("BEDROCK_API_KEY is missing from .env")
         _client = anthropic.AsyncAnthropic(base_url=settings.llm_base_url, api_key=settings.bedrock_api_key,
                                            max_retries=3, timeout=180.0)
     return _client

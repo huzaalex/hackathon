@@ -26,14 +26,14 @@ async def lifespan(_: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title="Poprire Agent – Orchestrator", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Garnishment Agent - Orchestrator", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 def get_case(case_id: str) -> Case:
     case = store.get(case_id)
     if not case:
-        raise HTTPException(status_code=404, detail="Caz inexistent")
+        raise HTTPException(status_code=404, detail="Case not found")
     return case
 
 
@@ -60,7 +60,7 @@ def list_cases():
 async def upload_case(file: UploadFile = File(...)):
     data = await file.read()
     if not data:
-        raise HTTPException(status_code=400, detail="Fișier gol")
+        raise HTTPException(status_code=400, detail="Empty file")
     case = store.create(kind="DOCUMENT", title=file.filename or "document.pdf", document_name=file.filename, document_bytes=data)
     workflow.enqueue_start(case)
     return case.summary_dict()
@@ -74,7 +74,7 @@ class SampleIn(BaseModel):
 async def case_from_sample(body: SampleIn):
     path = (SAMPLES_DIR / body.file).resolve()
     if path.parent != SAMPLES_DIR.resolve() or not path.is_file():
-        raise HTTPException(status_code=404, detail="Document de test inexistent")
+        raise HTTPException(status_code=404, detail="Sample document not found")
     case = store.create(kind="DOCUMENT", title=body.file, document_name=body.file, document_bytes=path.read_bytes())
     workflow.enqueue_start(case)
     return case.summary_dict()
@@ -119,7 +119,7 @@ async def case_stream(case_id: str, request: Request):
 def case_document(case_id: str):
     case = get_case(case_id)
     if not case.document_bytes:
-        raise HTTPException(status_code=404, detail="Cazul nu are document")
+        raise HTTPException(status_code=404, detail="The case has no document")
     return Response(case.document_bytes, media_type="application/pdf")
 
 
@@ -127,7 +127,7 @@ def case_document(case_id: str):
 def case_response(case_id: str):
     case = get_case(case_id)
     if not case.response_pdf:
-        raise HTTPException(status_code=404, detail="Răspunsul nu a fost generat")
+        raise HTTPException(status_code=404, detail="The reply letter has not been generated")
     return Response(case.response_pdf, media_type="application/pdf")
 
 
@@ -138,11 +138,11 @@ class ReviewIn(BaseModel):
 @app.post("/cases/{case_id}/review")
 async def answer_review(case_id: str, body: ReviewIn):
     case = get_case(case_id)
-    if case.status != "NECESITA_OPERATOR" or not case.review:
-        raise HTTPException(status_code=409, detail="Cazul nu așteaptă răspunsul unui operator")
+    if case.status != "NEEDS_REVIEW" or not case.review:
+        raise HTTPException(status_code=409, detail="The case is not waiting for an operator")
     if not body.answer.strip():
-        raise HTTPException(status_code=400, detail="Răspuns gol")
-    workflow.set_status(case, "IN_ASTEPTARE")
+        raise HTTPException(status_code=400, detail="Empty answer")
+    workflow.set_status(case, "QUEUED")
     workflow.enqueue_resume(case, body.answer.strip())
     return case.summary_dict()
 
@@ -159,12 +159,12 @@ class FundsReceived(BaseModel):
 
 @app.post("/webhooks/funds-received", status_code=202)
 async def funds_received(body: FundsReceived):
-    case = store.create(kind="EVENIMENT", title=f"Încasare {body.amount:g} {body.currency} – {body.client_id}",
+    case = store.create(kind="EVENT", title=f"Incoming {body.amount:g} {body.currency} - {body.client_id}",
                         trigger=body.model_dump())
-    case.blackboard["eveniment"] = body.model_dump()
-    case.blackboard["identificare"] = {"status": "IDENTIFICAT", "client_id": body.client_id, "candidati": [],
-                                       "cnp_corectat": None, "incredere": 1.0,
-                                       "motivare": "Client cunoscut din evenimentul core banking."}
+    case.blackboard["event"] = body.model_dump()
+    case.blackboard["identification"] = {"status": "IDENTIFIED", "client_id": body.client_id, "candidates": [],
+                                         "corrected_cnp": None, "confidence": 1.0,
+                                         "reasoning": "Client known from the core banking event."}
     workflow.enqueue_start(case)
     return case.summary_dict()
 
@@ -182,7 +182,7 @@ def samples():
 def sample_pdf(name: str):
     path = (SAMPLES_DIR / name).resolve()
     if path.parent != SAMPLES_DIR.resolve() or not path.is_file():
-        raise HTTPException(status_code=404, detail="Document inexistent")
+        raise HTTPException(status_code=404, detail="Document not found")
     return Response(path.read_bytes(), media_type="application/pdf")
 
 
@@ -202,8 +202,8 @@ async def demo_client(client_id: str):
 class IncomingIn(BaseModel):
     iban: str
     amount: float
-    source: str = "SALARIU"
-    description: str = "Încasare simulată (demo)"
+    source: str = "SALARY"
+    description: str = "Simulated credit (demo)"
 
 
 @app.post("/demo/incoming")

@@ -1,10 +1,10 @@
 export const API = "/api";
 
-export type CaseStatus = "IN_ASTEPTARE" | "IN_LUCRU" | "NECESITA_OPERATOR" | "FINALIZAT" | "EROARE";
+export type CaseStatus = "QUEUED" | "RUNNING" | "NEEDS_REVIEW" | "DONE" | "FAILED";
 
 export interface CaseSummary {
   id: string;
-  kind: "DOCUMENT" | "EVENIMENT";
+  kind: "DOCUMENT" | "EVENT";
   title: string;
   created_at: string;
   status: CaseStatus;
@@ -99,24 +99,50 @@ export const api = {
 };
 
 export const fmtMoney = (x: number | null | undefined, currency = "RON") =>
-  x == null ? "–" : `${x.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+  x == null ? "-" : `${x.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 
 export const STATUS_LABEL: Record<CaseStatus, string> = {
-  IN_ASTEPTARE: "În așteptare",
-  IN_LUCRU: "În lucru",
-  NECESITA_OPERATOR: "Necesită operator",
-  FINALIZAT: "Finalizat",
-  EROARE: "Eroare",
+  QUEUED: "Queued",
+  RUNNING: "Running",
+  NEEDS_REVIEW: "Needs operator",
+  DONE: "Done",
+  FAILED: "Failed",
 };
 
 export const OUTCOME_LABEL: Record<string, string> = {
-  POPRIRE_APLICATA_INTEGRAL: "Poprire aplicată integral",
-  POPRIRE_APLICATA_PARTIAL: "Poprire aplicată parțial",
-  FARA_FONDURI: "Fără fonduri – activă pe încasări viitoare",
-  DEBITOR_NECLIENT: "Debitorul nu este client",
-  DUPLICAT: "Duplicat – ignorat",
-  POPRIRE_RIDICATA: "Poprire ridicată",
-  REEVALUARE_APLICATA: "Reevaluare aplicată",
-  RESPINS_DE_OPERATOR: "Respins de operator",
-  DOCUMENT_NEPROCESABIL: "Document neprocesabil",
+  GARNISHMENT_APPLIED_FULL: "Garnishment applied in full",
+  GARNISHMENT_APPLIED_PARTIAL: "Garnishment applied partially",
+  NO_FUNDS: "No funds - active on future credits",
+  DEBTOR_NOT_CLIENT: "Debtor is not a client",
+  DUPLICATE: "Duplicate - ignored",
+  GARNISHMENT_RELEASED: "Garnishment released",
+  REEVALUATION_APPLIED: "Holds re-evaluated",
+  REJECTED_BY_OPERATOR: "Rejected by operator",
+  DOCUMENT_NOT_PROCESSABLE: "Document not processable",
+};
+
+export const CLAIM_LABEL: Record<string, string> = {
+  CHILD_SUPPORT: "Child support",
+  WAGE: "Wage claim",
+  TAX: "Tax claim",
+  UNSECURED: "Other (unsecured) claim",
+  UNKNOWN: "Unknown",
+};
+
+export const SOURCE_LABEL: Record<string, string> = {
+  SALARY: "Salary",
+  PENSION: "Pension",
+  CHILD_ALLOWANCE: "Child allowance",
+  SOCIAL_BENEFIT: "Social benefit",
+  CHILDCARE_BENEFIT: "Childcare benefit",
+  TRANSFER: "Transfer",
+  PAYMENT: "Payment",
+};
+
+/** Turns ENUM_LIKE_CODES into "Enum like codes" when no explicit label exists. */
+export const humanize = (code: string | null | undefined, labels?: Record<string, string>) => {
+  if (!code) return "-";
+  if (labels?.[code]) return labels[code];
+  const s = code.toLowerCase().replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 };

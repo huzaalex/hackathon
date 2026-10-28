@@ -45,12 +45,12 @@ def allocate(req: AllocationRequest) -> dict:
     explanation: list[str] = []
     for g in req.garnishments:
         if g.claim_type not in CLAIM_TYPES:
-            raise ValueError(f"Tip de creanță necunoscut: {g.claim_type}. Valori permise: {', '.join(CLAIM_TYPES)}")
+            raise ValueError(f"Unknown claim type: {g.claim_type}. Allowed values: {', '.join(CLAIM_TYPES)}")
 
     active = [a for a in req.accounts if a.status == "ACTIVE"]
     for a in req.accounts:
         if a.status != "ACTIVE":
-            explanation.append(f"Contul {a.iban} are statusul {a.status} și este ignorat.")
+            explanation.append(f"Account {a.iban} has status {a.status} and is ignored.")
     active.sort(key=lambda a: (a.currency != "RON", -a.balance * a.fx_to_ron))
 
     analyses = []
@@ -65,13 +65,13 @@ def allocate(req: AllocationRequest) -> dict:
             caps[ct] = max(Decimal(0), balance_ron - min(balance_ron, protected))
         analyses.append({"iban": a.iban, "currency": a.currency, "fx_to_ron": fx, "balance_ron": balance_ron,
                          "exempt_ron": exempt, "income_ron": income, "caps": caps})
-        line = f"Cont {a.iban} ({a.currency}): sold {balance_ron} RON"
+        line = f"Account {a.iban} ({a.currency}): balance {balance_ron} RON"
         if a.currency != "RON":
-            line += f" (curs {fx} RON/{a.currency})"
+            line += f" (rate {fx} RON/{a.currency})"
         if exempt:
-            line += f"; sume exceptate (alocații/ajutoare) {exempt} RON protejate integral"
+            line += f"; exempt credits (allowances/benefits) of {exempt} RON are fully protected"
         if income:
-            line += f"; venituri periodice (salariu/pensie) {income} RON, din care se poate urmări doar o fracție"
+            line += f"; periodic income (salary/pension) of {income} RON, of which only a fraction can be garnished"
         explanation.append(line + ".")
 
     used = {an["iban"]: Decimal(0) for an in analyses}
@@ -98,10 +98,10 @@ def allocate(req: AllocationRequest) -> dict:
         results.append({"id": g.id, "claim_type": g.claim_type, "claim_label": cfg["label"], "rank": cfg["rank"],
                         "requested_ron": float(need), "allocated_ron": float(allocated), "remaining_ron": float(remaining),
                         "fully_covered": remaining <= 0, "legal_basis": cfg["legal_basis"]})
-        status = "acoperită integral" if remaining <= 0 else f"acoperită parțial, rămân {remaining} RON (poprirea rămâne activă pe încasări viitoare)"
+        status = "fully covered" if remaining <= 0 else f"partially covered, {remaining} RON outstanding (the garnishment stays active on future credits)"
         explanation.append(
-            f"Poprirea {g.id} ({cfg['label']}, rang {cfg['rank']}, max. {round(cfg['income_fraction'] * 100)}% din venituri periodice): "
-            f"solicitat {need} RON, alocat {allocated} RON – {status}.")
+            f"Garnishment {g.id} ({cfg['label']}, rank {cfg['rank']}, max {round(cfg['income_fraction'] * 100)}% of periodic income): "
+            f"requested {need} RON, allocated {allocated} RON - {status}.")
 
     return {
         "holds": holds,

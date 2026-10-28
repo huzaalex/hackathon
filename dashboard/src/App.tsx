@@ -14,8 +14,8 @@ export default function App() {
     try {
       setCases(await api.cases());
       setError(null);
-    } catch (e) {
-      setError("Orchestratorul nu răspunde – rulează `docker compose up`?");
+    } catch {
+      setError("The orchestrator is not responding. Is `docker compose up` running?");
     }
   }, []);
 
@@ -32,7 +32,7 @@ export default function App() {
   };
 
   const onReset = async () => {
-    if (!confirm("Resetezi datele demo (bancă + cazuri)?")) return;
+    if (!confirm("Reset the demo data (bank and cases)?")) return;
     await api.reset();
     setSelected(null);
     refresh();
@@ -42,10 +42,10 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="logo">§</span>
+          <span className="logo">GA</span>
           <div>
-            <h1>Poprire Agent</h1>
-            <p>Procesare autonomă a adreselor de poprire · Banca Demo S.A.</p>
+            <h1>Garnishment Agent</h1>
+            <p>Autonomous processing of garnishment orders · Banca Demo S.A.</p>
           </div>
         </div>
         <div className="topbar-right">
@@ -68,11 +68,10 @@ export default function App() {
 function EmptyState() {
   return (
     <div className="empty">
-      <h2>Alege un scenariu sau încarcă o adresă de poprire</h2>
+      <h2>Pick a scenario or upload a garnishment order</h2>
       <p>
-        Supervizorul planifică pașii, deleagă agenților specializați (citire, identificare, juridic, acțiune) și
-        cere ajutorul unui operator doar când nu e sigur. Toate calculele legale sunt făcute de un motor de reguli
-        determinist.
+        The supervisor plans the steps, delegates to specialised agents (reader, identification, legal, action) and only
+        asks a human operator when it is not sure. Every legal calculation is done by a deterministic rules engine.
       </p>
     </div>
   );

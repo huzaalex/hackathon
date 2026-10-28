@@ -11,7 +11,7 @@ def test_valid_cnp():
     assert r["valid"]
     assert r["sex"] == "M"
     assert r["birth_date"] == "1985-03-12"
-    assert r["county"] == "București S2"
+    assert r["county"] == "Bucharest Sector 2"
 
 
 def test_wrong_checksum_detected():

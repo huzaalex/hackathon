@@ -18,7 +18,7 @@ ECB_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 CACHE_SECONDS = 3600
 STATIC_FALLBACK = {"EUR": 5.35, "USD": 4.8, "GBP": 6.4, "CHF": 5.8}
 
-app = FastAPI(title="FX Service (BNR / BCE)", version="0.2.0")
+app = FastAPI(title="FX Service (BNR / ECB)", version="0.2.0")
 _cache: dict = {"fetched_at": 0.0, "data": None}
 
 
@@ -46,18 +46,18 @@ def parse_ecb(xml_text: str) -> dict:
     for cur, value in per_eur.items():
         if cur != "RON":
             rates[cur] = round(ron_per_eur / value, 6)
-    return {"date": day.get("time"), "rates": rates, "source": "BCE (BNR indisponibil; curs RON calculat prin EUR)"}
+    return {"date": day.get("time"), "rates": rates, "source": "ECB (BNR unavailable; RON rate computed via EUR)"}
 
 
 async def fetch_fresh() -> tuple[dict | None, list[str]]:
     errors = []
     async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-        for name, url, parser in (("BNR", BNR_URL, parse_bnr), ("BCE", ECB_URL, parse_ecb)):
+        for name, url, parser in (("BNR", BNR_URL, parse_bnr), ("ECB", ECB_URL, parse_ecb)):
             try:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 if "xml" not in resp.headers.get("content-type", ""):
-                    raise ValueError(f"răspuns non-XML ({resp.headers.get('content-type')}, url final {resp.url})")
+                    raise ValueError(f"non-XML response ({resp.headers.get('content-type')}, final url {resp.url})")
                 return parser(resp.text), errors
             except Exception as e:
                 errors.append(f"{name}: {e}")
@@ -72,8 +72,8 @@ async def get_rates() -> dict:
         _cache.update(fetched_at=time.time(), data=data)
         return {**data, **({"warning": "; ".join(errors)} if errors else {})}
     if _cache["data"]:
-        return {**_cache["data"], "source": _cache["data"]["source"] + " (cache expirat)", "warning": "; ".join(errors)}
-    return {"date": None, "rates": STATIC_FALLBACK, "source": "FALLBACK STATIC - NU folosiți în producție",
+        return {**_cache["data"], "source": _cache["data"]["source"] + " (stale cache)", "warning": "; ".join(errors)}
+    return {"date": None, "rates": STATIC_FALLBACK, "source": "STATIC FALLBACK - do not use in production",
             "warning": "; ".join(errors)}
 
 
@@ -94,6 +94,6 @@ async def rate(currency: str):
     if currency == "RON":
         return {"currency": "RON", "rate": 1.0, "date": data["date"], "source": data["source"]}
     if currency not in data["rates"]:
-        raise HTTPException(status_code=404, detail=f"Moneda {currency} nu este cotată")
+        raise HTTPException(status_code=404, detail=f"Currency {currency} is not quoted")
     return {"currency": currency, "rate": data["rates"][currency], "date": data["date"], "source": data["source"],
             **({"warning": data["warning"]} if "warning" in data else {})}

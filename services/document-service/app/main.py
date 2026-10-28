@@ -41,7 +41,7 @@ async def extract(file: UploadFile = File(...)):
     try:
         pdf = pdfium.PdfDocument(data)
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Fișierul nu este un PDF valid: {e}")
+        raise HTTPException(status_code=422, detail=f"File is not a valid PDF: {e}")
 
     pages_text = []
     for page in pdf:

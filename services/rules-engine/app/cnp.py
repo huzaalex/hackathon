@@ -15,8 +15,8 @@ COUNTIES = {
     16: "Dolj", 17: "Galați", 18: "Gorj", 19: "Harghita", 20: "Hunedoara", 21: "Ialomița", 22: "Iași", 23: "Ilfov",
     24: "Maramureș", 25: "Mehedinți", 26: "Mureș", 27: "Neamț", 28: "Olt", 29: "Prahova", 30: "Satu Mare",
     31: "Sălaj", 32: "Sibiu", 33: "Suceava", 34: "Teleorman", 35: "Timiș", 36: "Tulcea", 37: "Vaslui", 38: "Vâlcea",
-    39: "Vrancea", 40: "București", 41: "București S1", 42: "București S2", 43: "București S3", 44: "București S4",
-    45: "București S5", 46: "București S6", 51: "Călărași", 52: "Giurgiu", 70: "Oricare județ (CNP emis după 2024)",
+    39: "Vrancea", 40: "Bucharest", 41: "Bucharest Sector 1", 42: "Bucharest Sector 2", 43: "Bucharest Sector 3", 44: "Bucharest Sector 4",
+    45: "Bucharest Sector 5", 46: "Bucharest Sector 6", 51: "Călărași", 52: "Giurgiu", 70: "Any county (CNP issued after 2024)",
 }
 
 CENTURY_BY_SEX_DIGIT = {1: 1900, 2: 1900, 3: 1800, 4: 1800, 5: 2000, 6: 2000}
@@ -44,22 +44,22 @@ def validate(cnp: str) -> dict:
     cnp = (cnp or "").strip().replace(" ", "")
     errors: list[str] = []
     if len(cnp) != 13 or not cnp.isdigit():
-        return {"cnp": cnp, "valid": False, "errors": ["CNP-ul trebuie să aibă exact 13 cifre"]}
+        return {"cnp": cnp, "valid": False, "errors": ["The CNP must have exactly 13 digits"]}
 
     if cnp[0] == "0":
-        errors.append("Prima cifră (sex/secol) nu poate fi 0")
+        errors.append("The first digit (sex/century) cannot be 0")
     birth = _birth_date(cnp)
     if birth is None:
-        errors.append("Data nașterii codificată în CNP nu este o dată validă")
+        errors.append("The birth date encoded in the CNP is not a valid date")
     county = int(cnp[7:9])
     if county not in COUNTIES:
-        errors.append(f"Codul de județ {cnp[7:9]} nu există")
+        errors.append(f"County code {cnp[7:9]} does not exist")
     if cnp[9:12] == "000":
-        errors.append("Numărul de ordine NNN nu poate fi 000")
+        errors.append("The sequence number NNN cannot be 000")
     expected = control_digit(cnp[:12])
     checksum_ok = expected == int(cnp[12])
     if not checksum_ok:
-        errors.append(f"Cifra de control este {cnp[12]}, dar ar trebui să fie {expected} (posibilă greșeală de tastare/OCR)")
+        errors.append(f"The check digit is {cnp[12]} but should be {expected} (likely a typing or OCR error)")
 
     return {
         "cnp": cnp,

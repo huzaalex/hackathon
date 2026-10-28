@@ -74,7 +74,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Core Banking (simulat)", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Core Banking (simulated)", version="0.1.0", lifespan=lifespan)
 
 
 def get_db():
@@ -120,7 +120,7 @@ def garnishment_out(db: Session, g: Garnishment) -> dict:
 def get_client_or_404(db: Session, client_id: str) -> Client:
     c = db.get(Client, client_id)
     if not c:
-        raise HTTPException(status_code=404, detail=f"Clientul {client_id} nu există")
+        raise HTTPException(status_code=404, detail=f"Client {client_id} not found")
     return c
 
 
@@ -145,7 +145,7 @@ def list_clients(db: Session = Depends(get_db)):
 @app.get("/clients/search")
 def search_clients(cnp: str | None = None, name: str | None = None, db: Session = Depends(get_db)):
     if not cnp and not name:
-        raise HTTPException(status_code=400, detail="Specificați cnp sau name")
+        raise HTTPException(status_code=400, detail="Provide cnp or name")
     if cnp:
         return [client_out(c) for c in db.scalars(select(Client).where(Client.cnp == cnp.strip())).all()]
     tokens = norm_text(name).split()
@@ -246,7 +246,7 @@ def create_garnishment(body: GarnishmentIn, db: Session = Depends(get_db)):
                                               Garnishment.client_id == body.client_id,
                                               Garnishment.status == "ACTIVE"))
     if dup:
-        raise HTTPException(status_code=409, detail=f"Există deja poprirea activă {dup.id} pentru dosarul {dup.case_ref}")
+        raise HTTPException(status_code=409, detail=f"An active garnishment {dup.id} already exists for case {dup.case_ref}")
     count = db.scalar(select(func.count()).select_from(Garnishment)) or 0
     g = Garnishment(id=f"GR-{count + 1:04d}", client_id=body.client_id, case_ref=body.case_ref,
                     case_ref_norm=norm_ref(body.case_ref), issuer_type=body.issuer_type, issuer_name=body.issuer_name,
@@ -261,9 +261,9 @@ def create_garnishment(body: GarnishmentIn, db: Session = Depends(get_db)):
 def lift_garnishment(garnishment_id: str, db: Session = Depends(get_db)):
     g = db.get(Garnishment, garnishment_id)
     if not g:
-        raise HTTPException(status_code=404, detail=f"Poprirea {garnishment_id} nu există")
+        raise HTTPException(status_code=404, detail=f"Garnishment {garnishment_id} not found")
     if g.status != "ACTIVE":
-        raise HTTPException(status_code=409, detail=f"Poprirea {garnishment_id} are statusul {g.status}")
+        raise HTTPException(status_code=409, detail=f"Garnishment {garnishment_id} has status {g.status}")
     released = []
     for h in db.scalars(select(Hold).where(Hold.garnishment_id == g.id, Hold.status == "ACTIVE")).all():
         h.status, h.released_at = "RELEASED", datetime.now()
@@ -305,15 +305,15 @@ def replace_holds(client_id: str, plan: HoldPlan, db: Session = Depends(get_db))
     for h in plan.holds:
         acc = accounts.get(h.iban)
         if not acc or acc.status != "ACTIVE":
-            raise HTTPException(status_code=422, detail=f"Contul {h.iban} nu aparține clientului sau nu este activ")
+            raise HTTPException(status_code=422, detail=f"Account {h.iban} does not belong to the client or is not active")
         if h.garnishment_id not in active_g:
-            raise HTTPException(status_code=422, detail=f"Poprirea {h.garnishment_id} nu este activă pentru acest client")
+            raise HTTPException(status_code=422, detail=f"Garnishment {h.garnishment_id} is not active for this client")
         if h.amount <= 0:
-            raise HTTPException(status_code=422, detail="Sumele blocate trebuie să fie pozitive")
+            raise HTTPException(status_code=422, detail="Held amounts must be positive")
         per_iban[h.iban] = per_iban.get(h.iban, Decimal(0)) + Decimal(str(h.amount))
     for iban, total in per_iban.items():
         if total > accounts[iban].balance:
-            raise HTTPException(status_code=422, detail=f"Blocarea de {total} depășește soldul contului {iban} ({accounts[iban].balance})")
+            raise HTTPException(status_code=422, detail=f"A hold of {total} exceeds the balance of account {iban} ({accounts[iban].balance})")
 
     now = datetime.now()
     released = 0
@@ -332,8 +332,8 @@ def replace_holds(client_id: str, plan: HoldPlan, db: Session = Depends(get_db))
 class IncomingIn(BaseModel):
     iban: str
     amount: float
-    source: str = "SALARIU"
-    description: str = "Încasare simulată"
+    source: str = "SALARY"
+    description: str = "Simulated credit"
 
 
 def notify_orchestrator(payload: dict):
@@ -347,9 +347,9 @@ def notify_orchestrator(payload: dict):
 def simulate_incoming(body: IncomingIn, background: BackgroundTasks, db: Session = Depends(get_db)):
     acc = db.get(Account, body.iban)
     if not acc or acc.status != "ACTIVE":
-        raise HTTPException(status_code=404, detail="Cont inexistent sau inactiv")
+        raise HTTPException(status_code=404, detail="Account not found or inactive")
     if body.amount <= 0:
-        raise HTTPException(status_code=422, detail="Suma trebuie să fie pozitivă")
+        raise HTTPException(status_code=422, detail="Amount must be positive")
     amount = Decimal(str(body.amount))
     db.add(Transaction(iban=acc.iban, booked_at=datetime.now(), amount=amount, direction="CREDIT",
                        source=body.source, description=body.description))

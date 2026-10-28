@@ -7,7 +7,7 @@ from .config import settings
 
 class ServiceError(Exception):
     def __init__(self, service: str, status: int, detail: str):
-        super().__init__(f"{service} a răspuns {status}: {detail}")
+        super().__init__(f"{service} returned {status}: {detail}")
         self.status = status
         self.detail = detail
 
@@ -19,7 +19,7 @@ async def _call(service: str, method: str, url: str, **kwargs):
     try:
         resp = await _http.request(method, url, **kwargs)
     except httpx.HTTPError as e:
-        raise ServiceError(service, 503, f"serviciu indisponibil ({e.__class__.__name__})")
+        raise ServiceError(service, 503, f"service unavailable ({e.__class__.__name__})")
     if resp.status_code >= 400:
         try:
             detail = resp.json().get("detail", resp.text)
