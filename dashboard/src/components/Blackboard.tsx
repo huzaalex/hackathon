@@ -28,14 +28,18 @@ const LETTER: Record<string, string> = {
   DUPLICATE_NOTICE: "Duplicate notice",
 };
 
+const VERDICT: Record<string, string> = { AUTHENTIC: "Authentic", SUSPICIOUS: "Suspicious", FRAUDULENT: "Likely forged" };
+const CHECK_STATUS: Record<string, string> = { PASS: "Pass", FAIL: "Fail", WARN: "Warning", SKIP: "Not checked" };
+
 const show = (v: unknown) => (v === null || v === undefined || v === "" ? "-" : typeof v === "boolean" ? (v ? "Yes" : "No") : String(v));
 const percent = (v: unknown) => (typeof v === "number" ? `${Math.round(v * 100)}%` : "-");
 
 export default function Blackboard({ data }: { data: Record<string, any> }) {
   const { document: doc, identification: id, legal, allocation_plan: plan, letter, actions, event } = data;
   const { registered_garnishment: registered, applied_holds: applied, release } = data;
+  const { authenticity: auth, authenticity_checks: authChecks } = data;
   const known = new Set(["document", "identification", "legal", "allocation_plan", "letter", "actions", "event", "text_extraction",
-    "registered_garnishment", "applied_holds", "release"]);
+    "registered_garnishment", "applied_holds", "release", "authenticity", "authenticity_checks"]);
   const others = Object.entries(data).filter(([k]) => !known.has(k));
 
   const docRows: [string, ReactNode][] = doc
@@ -90,6 +94,39 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
           {doc.issues?.length > 0 && (
             <ul className="issues">{doc.issues.map((p: string, i: number) => <li key={i}>{p}</li>)}</ul>
           )}
+        </Card>
+      )}
+
+      {(auth || authChecks) && (
+        <Card title="Authenticity check (Authenticity Agent)" tone="coral">
+          {auth && (
+            <p>
+              <span className={`badge verdict-${auth.verdict}`}>{humanize(auth.verdict, VERDICT)}</span>{" "}
+              <span className="muted">risk score {percent(auth.risk_score)}</span>
+            </p>
+          )}
+          {authChecks && (
+            <table className="grid checks-table">
+              <thead><tr><th>Deterministic check</th><th>Result</th><th>Detail</th></tr></thead>
+              <tbody>
+                {authChecks.checks.map((c: any) => (
+                  <tr key={c.id}>
+                    <td>{c.label}</td>
+                    <td><span className={`check-status ${c.status}`}>{humanize(c.status, CHECK_STATUS)}</span></td>
+                    <td className="small">{c.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {auth?.red_flags?.length > 0 && (
+            <>
+              <h5 className="sub">Red flags found by the agent</h5>
+              <ul className="issues">{auth.red_flags.map((f: string, i: number) => <li key={i}>{f}</li>)}</ul>
+            </>
+          )}
+          {auth?.reasoning && <RichText text={auth.reasoning} />}
+          {auth?.recommendation && <p><strong>Recommendation:</strong> {auth.recommendation}</p>}
         </Card>
       )}
 

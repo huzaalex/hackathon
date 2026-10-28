@@ -5,6 +5,8 @@ import itertools
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from .config import settings
+
 
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -31,12 +33,23 @@ class Case:
     messages: list = field(default_factory=list)
     pending_tool_results: list = field(default_factory=list)
     usage: dict = field(default_factory=lambda: {"llm_calls": 0, "input_tokens": 0, "output_tokens": 0})
+    # Metrics: time the agents actually worked (operator waiting time excluded) and human interventions
+    processing_seconds: float = 0.0
+    operator_interventions: int = 0
+    finished_at: str | None = None
     subscribers: list[asyncio.Queue] = field(default_factory=list, repr=False)
+
+    @property
+    def cost_usd(self) -> float:
+        return (self.usage["input_tokens"] * settings.price_input_per_mtok
+                + self.usage["output_tokens"] * settings.price_output_per_mtok) / 1_000_000
 
     def summary_dict(self) -> dict:
         return {"id": self.id, "kind": self.kind, "title": self.title, "created_at": self.created_at,
                 "status": self.status, "outcome": self.outcome, "document_name": self.document_name,
-                "client_id": (self.blackboard.get("identification") or {}).get("client_id")}
+                "client_id": (self.blackboard.get("identification") or {}).get("client_id"),
+                "processing_seconds": round(self.processing_seconds, 1), "operator_interventions": self.operator_interventions,
+                "cost_usd": round(self.cost_usd, 4)}
 
     def detail_dict(self) -> dict:
         return {**self.summary_dict(), "summary": self.summary, "blackboard": self.blackboard, "review": self.review,

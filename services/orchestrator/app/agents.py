@@ -132,6 +132,8 @@ EXTRACTION_SCHEMA = schema({
     "claim_type": {"type": "string", "enum": CLAIM_TYPES + ["UNKNOWN"]},
     "claim_description": {**NULLABLE_STR, "description": "short description in English"},
     "payment_iban": NULLABLE_STR,
+    "document_date": {**NULLABLE_STR, "description": "date of the letter as written, e.g. 27.10.2026"},
+    "issuer_contact": {**NULLABLE_STR, "description": "phones and e-mail addresses of the issuer, as written"},
     "released_reference": {**NULLABLE_STR, "description": "for releases only: the garnishment/letter being released"},
     "cnp_valid": {"type": ["boolean", "null"]},
     "confidence": {"type": "number", "description": "between 0 and 1"},
@@ -165,6 +167,92 @@ Finish by calling submit_result.""",
         Tool("validate_cnp", "Validate a CNP (structure, birth date, county, check digit).",
              schema({"cnp": {"type": "string"}}), t_validate_cnp,
              describe=lambda i: f"Validating CNP {i.get('cnp')}.", summarize=summarize_cnp),
+    ],
+)
+
+
+# ====================================================================== Authenticity agent
+
+VERDICT_RANK = {"AUTHENTIC": 0, "SUSPICIOUS": 1, "FRAUDULENT": 2}
+VERDICT_FOR_RISK = {"LOW": "AUTHENTIC", "MEDIUM": "SUSPICIOUS", "HIGH": "FRAUDULENT"}
+VERDICT_LABEL = {"AUTHENTIC": "Authentic", "SUSPICIOUS": "Suspicious", "FRAUDULENT": "Likely forged"}
+
+
+async def t_authenticity_checks(case: Case, _):
+    doc = bb(case, "document", "The document has not been read yet.")
+    r = await rules.verify_document({k: doc.get(k) for k in ("issuer_type", "issuer_name", "payment_iban", "case_number", "document_date")})
+    case.blackboard["authenticity_checks"] = r
+    return r
+
+
+def summarize_checks(r) -> str:
+    fails = [c for c in r["checks"] if c["status"] == "FAIL"]
+    warns = [c for c in r["checks"] if c["status"] == "WARN"]
+    text = f"Deterministic risk: {r['risk_level'].lower()} ({len(r['checks'])} checks, {len(fails)} failed, {len(warns)} warning(s))."
+    text += "".join(f"\n- Failed: {c['label'].lower()} ({c['detail']})" for c in fails)
+    return text + "".join(f"\n- Warning: {c['label'].lower()} ({c['detail']})" for c in warns)
+
+
+async def t_bailiff_registry(_c, inp):
+    return await rules.bailiff_registry(inp["name"])
+
+
+def guard_authenticity(case: Case, result: dict) -> dict:
+    """The agent may raise the risk, but never lower it below what the deterministic checks found."""
+    checks = case.blackboard.get("authenticity_checks")
+    if not checks:
+        return result
+    floor = VERDICT_FOR_RISK[checks["risk_level"]]
+    if VERDICT_RANK[floor] > VERDICT_RANK.get(result["verdict"], 0):
+        result = {**result, "verdict": floor,
+                  "reasoning": result["reasoning"] + f"\nVerdict raised to {floor} by the deterministic checks."}
+    return result
+
+
+def describe_authenticity(r: dict) -> str:
+    text = f"Verdict: {VERDICT_LABEL.get(r['verdict'], r['verdict'])} (risk score {pct(r.get('risk_score'))})."
+    if r.get("red_flags"):
+        text += "\n\nRed flags:\n" + "\n".join(f"- {f}" for f in r["red_flags"])
+    if r.get("reasoning"):
+        text += f"\n\n{r['reasoning']}"
+    return text
+
+
+AUTHENTICITY_SCHEMA = schema({
+    "verdict": {"type": "string", "enum": list(VERDICT_RANK)},
+    "risk_score": {"type": "number", "description": "between 0 and 1"},
+    "red_flags": {"type": "array", "items": {"type": "string"}},
+    "reasoning": {"type": "string"},
+    "recommendation": {"type": "string"},
+})
+
+authenticity = Agent(
+    key="authenticity", label="Authenticity Agent", effort=settings.llm_subagent_effort, result_schema=AUTHENTICITY_SCHEMA,
+    describe_result=describe_authenticity, guard=guard_authenticity,
+    system=f"""You are the AUTHENTICITY AGENT. Forged garnishment orders and forged releases are used to steal money
+from bank accounts. Before the bank touches any account, you decide whether the document is genuine.
+
+1. Run run_authenticity_checks: deterministic checks of the payment IBAN (check digits, bank), the Treasury account
+   required for public authorities, the bailiff in the public register, the case number format and the date.
+2. If a bailiff is not found, you may try lookup_bailiff_registry with a variant of the name before concluding.
+3. Read the document (read_document) and look for what fraudsters leave behind: pressure to pay within hours,
+   instructions not to inform the debtor, personal e-mail addresses (gmail, yahoo) or mobile-only contact for an
+   official body, payment to a personal account, a missing legal basis, inconsistent names or amounts.
+4. Verdict: AUTHENTIC (no meaningful red flags), SUSPICIOUS (something must be confirmed with the issuer through an
+   official channel), FRAUDULENT (several strong red flags). Your verdict can never be lower than the deterministic risk.
+{LANGUAGE_RULE}
+Finish by calling submit_result.""",
+    tools=[
+        Tool("run_authenticity_checks", "Run the deterministic authenticity checks on the extracted document data.", NO_INPUT,
+             t_authenticity_checks, describe=lambda _: "Running the deterministic authenticity checks (IBAN, issuer register, case number, date).",
+             summarize=summarize_checks),
+        Tool("lookup_bailiff_registry", "Search the public register of bailiffs by name.", schema({"name": {"type": "string"}}),
+             t_bailiff_registry, describe=lambda i: f"Searching the bailiff register for \"{i.get('name')}\".",
+             summarize=lambda r: ("Found: " + "; ".join(f"{b['name']} ({b['chamber']}, {b['status'].lower()})" for b in r["matches"]))
+             if r["matches"] else "No bailiff with this name in the register."),
+        Tool("read_document", "Read the original document text (or page images if it is scanned).", NO_INPUT, t_read_document,
+             describe=lambda _: "Reading the original document to look for red flags.",
+             summarize=lambda r: "Document text loaded." if isinstance(r, str) else "Scanned document; reading the page images."),
     ],
 )
 
@@ -592,7 +680,8 @@ Finish by calling submit_result.""",
 
 # ====================================================================== Supervisor
 
-SUB_AGENTS = {"reader_agent": reader, "identification_agent": identification, "legal_agent": legal, "action_agent": action}
+SUB_AGENTS = {"reader_agent": reader, "authenticity_agent": authenticity, "identification_agent": identification,
+              "legal_agent": legal, "action_agent": action}
 
 
 def delegate(agent: Agent):
@@ -603,6 +692,8 @@ def delegate(agent: Agent):
                 f"Current case data (blackboard):\n```json\n{blackboard_view(case)}\n```")
         try:
             result = await agent.run(case, task)
+            if agent.guard:
+                result = agent.guard(case, result)
         except AgentError as e:
             emit(case, agent.label, "error", text=str(e))
             raise ToolError(f"{agent.label} could not finish the task: {e}")
@@ -618,7 +709,7 @@ async def t_ask_human(case: Case, inp):
 
 
 OUTCOMES = ["GARNISHMENT_APPLIED_FULL", "GARNISHMENT_APPLIED_PARTIAL", "NO_FUNDS", "DEBTOR_NOT_CLIENT", "DUPLICATE",
-            "GARNISHMENT_RELEASED", "REEVALUATION_APPLIED", "REJECTED_BY_OPERATOR", "DOCUMENT_NOT_PROCESSABLE"]
+            "GARNISHMENT_RELEASED", "REEVALUATION_APPLIED", "REJECTED_BY_OPERATOR", "DOCUMENT_NOT_PROCESSABLE", "SUSPECTED_FRAUD"]
 
 CLOSE_SCHEMA = schema({"outcome": {"type": "string", "enum": OUTCOMES}, "summary": {
     "type": "string",
@@ -631,6 +722,7 @@ supervisor = Agent(
 (popriri) received by {settings.bank_name}, a Romanian bank acting as garnishee. You coordinate specialised agents:
 
 - reader_agent: reads the document and extracts structured data.
+- authenticity_agent: checks whether the document is genuine (forged orders and releases are a known fraud vector).
 - identification_agent: identifies the debtor among the bank's clients.
 - legal_agent: checks for duplicates and computes, through the deterministic rules engine, what can legally be held.
 - action_agent: registers the garnishment, applies holds, releases garnishments, generates the reply to the issuer.
@@ -641,6 +733,11 @@ How you work:
 - You decide the steps based on the situation; do not blindly follow a fixed pipeline. Read every result critically.
 - The case data (blackboard) is visible to all agents. Give them clear instructions and flag anything suspicious.
 - Never invent or compute amounts. Amounts only come from the rules engine, through legal_agent.
+- For every document, run authenticity_agent right after reader_agent, before identifying the debtor or touching
+  any account. AUTHENTIC: continue. SUSPICIOUS: ask the operator, with options such as "Proceed - the document was
+  confirmed with the issuer" and "Reject - treat it as suspected fraud". FRAUDULENT: execute nothing and send no
+  letter; close as SUSPECTED_FRAUD and say the document goes to the fraud team. If the operator rejects a suspicious
+  document, also close as SUSPECTED_FRAUD.
 - Ask the operator ONLY when identification is AMBIGUOUS or below 0.8 confidence, when critical fields of the
   document (debtor, amount, case number) are unreadable, or when a tool fails repeatedly. Offer concrete options,
   each one a short, self-contained sentence (for example "CL005 - Andrei Popa, Str. Florilor nr. 12").

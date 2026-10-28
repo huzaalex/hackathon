@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, CaseSummary } from "./api";
+import { api, CaseSummary, EvalState } from "./api";
 import { loadPref, savePref } from "./prefs";
 import Header, { Theme } from "./components/Header";
 import CasesSidebar from "./components/CasesSidebar";
 import UploadZone from "./components/UploadZone";
 import Steps from "./components/Steps";
 import CaseView from "./components/CaseView";
+import ImpactBar from "./components/ImpactBar";
+import EvalPanel from "./components/EvalPanel";
 
 const initialTheme = (): Theme =>
   (document.documentElement.dataset.theme as Theme) ||
@@ -18,6 +20,8 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [model, setModel] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [evalState, setEvalState] = useState<EvalState | null>(null);
+  const [evalOpen, setEvalOpen] = useState(false);
   const detailRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -43,6 +47,26 @@ export default function App() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  // Evaluation status: polled faster while a run is active or the panel is open
+  const evalActive = evalOpen || evalState?.status === "RUNNING";
+  useEffect(() => {
+    const load = () => api.evalStatus().then(setEvalState).catch(() => undefined);
+    load();
+    const t = setInterval(load, evalActive ? 2000 : 6000);
+    return () => clearInterval(t);
+  }, [evalActive]);
+
+  const startEval = async () => {
+    if (!confirm("Start the evaluation? It resets the demo data, runs every scenario end to end (about 15-20 minutes) and makes real LLM calls.")) return;
+    try {
+      setSelected(null);
+      setEvalState(await api.evalRun());
+      refresh();
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
   const openCase = (id: string) => {
     setSelected(id);
     if (window.innerWidth <= 900) setCasesOpen(false); // the drawer covers the page on small screens
@@ -65,7 +89,26 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} onReset={onReset} onCreated={onCreated} />
+      <Header
+        theme={theme}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        onReset={onReset}
+        onCreated={onCreated}
+        evalState={evalState}
+        onOpenEval={() => setEvalOpen(true)}
+      />
+
+      {evalOpen && (
+        <EvalPanel
+          state={evalState}
+          onClose={() => setEvalOpen(false)}
+          onStart={startEval}
+          onOpenCase={(id) => {
+            setEvalOpen(false);
+            openCase(id);
+          }}
+        />
+      )}
 
       <CasesSidebar
         open={casesOpen}
@@ -82,6 +125,8 @@ export default function App() {
             <p className="eyebrow">Back-office automation</p>
             <h1>Autonomous processing of garnishment orders</h1>
           </section>
+
+          <ImpactBar />
 
           <UploadZone onCreated={onCreated} />
           <Steps status={selectedCase?.status ?? null} />

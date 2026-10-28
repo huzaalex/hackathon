@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from . import workflow
+from . import evaluation, workflow
 from .config import settings
 from .services import ServiceError, core, rules
 from .store import Case, store
@@ -142,8 +142,7 @@ async def answer_review(case_id: str, body: ReviewIn):
         raise HTTPException(status_code=409, detail="The case is not waiting for an operator")
     if not body.answer.strip():
         raise HTTPException(status_code=400, detail="Empty answer")
-    workflow.set_status(case, "QUEUED")
-    workflow.enqueue_resume(case, body.answer.strip())
+    workflow.answer_review(case, body.answer.strip())
     return case.summary_dict()
 
 
@@ -213,9 +212,54 @@ async def demo_incoming(body: IncomingIn):
 
 @app.post("/demo/reset")
 async def demo_reset():
+    if evaluation.is_running():
+        raise HTTPException(status_code=409, detail="An evaluation is running; wait for it to finish")
     await proxy(core.reset())
     store.clear()
     return {"status": "reset"}
+
+
+# ---------------------------------------------------------------- impact metrics and evaluation
+
+@app.get("/metrics")
+def metrics():
+    """Live impact of the agents over the cases processed in this session."""
+    cases = store.all()
+    done = [c for c in cases if c.status == "DONE"]
+    n = len(done)
+    reviews = sum(c.operator_interventions for c in done)
+    automated = sum(1 for c in done if c.operator_interventions == 0)
+    return {
+        "cases_done": n,
+        "in_progress": sum(1 for c in cases if c.status in ("QUEUED", "RUNNING", "NEEDS_REVIEW")),
+        "automated": automated,
+        "automation_rate": automated / n if n else None,
+        "avg_processing_seconds": sum(c.processing_seconds for c in done) / n if n else None,
+        "avg_cost_usd": sum(c.cost_usd for c in done) / n if n else None,
+        "total_cost_usd": sum(c.cost_usd for c in done),
+        "manual_minutes_saved": max(0.0, n * settings.manual_minutes_per_case - reviews * settings.operator_minutes_per_review),
+        "frauds_stopped": sum(1 for c in done if c.outcome == "SUSPECTED_FRAUD"),
+        "assumptions": {
+            "manual_minutes_per_case": settings.manual_minutes_per_case,
+            "operator_minutes_per_review": settings.operator_minutes_per_review,
+            "price_input_per_mtok": settings.price_input_per_mtok,
+            "price_output_per_mtok": settings.price_output_per_mtok,
+            "model": settings.llm_model,
+        },
+    }
+
+
+@app.post("/eval/run", status_code=202)
+async def eval_run():
+    if evaluation.is_running():
+        raise HTTPException(status_code=409, detail="An evaluation is already running")
+    evaluation.start()
+    return evaluation.state
+
+
+@app.get("/eval/status")
+def eval_status():
+    return evaluation.state
 
 
 @app.get("/demo/rules")

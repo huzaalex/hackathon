@@ -18,8 +18,9 @@ Băncile primesc zilnic adrese de poprire de la executori judecătorești, ANAF 
                       ┌─────────────▼──────────────┐
                       │   ORCHESTRATOR (:8000)     │  Claude Opus 5.5 pe Amazon Bedrock
                       │   Supervizor  ─┬─ Citire   │  tool calling, buclă agentică proprie,
-                      │                ├─ Identif. │  pauză/reluare pentru operator uman,
-                      │                ├─ Juridic  │  blackboard partajat între agenți
+                      │                ├─ Autentic.│  pauză/reluare pentru operator uman,
+                      │                ├─ Identif. │  blackboard partajat între agenți
+                      │                ├─ Juridic  │
                       │                └─ Acțiune  │
                       └──┬─────────┬─────────┬─────┬┘
           ┌──────────────▼─┐ ┌─────▼──────┐ ┌▼──────────┐ ┌▼───────────┐
@@ -41,6 +42,8 @@ Băncile primesc zilnic adrese de poprire de la executori judecătorești, ANAF 
 4. **Human-in-the-loop real.** Când identificarea e ambiguă, cazul intră în pauză, apare în dashboard cu opțiuni, iar răspunsul operatorului reia exact conversația agentului.
 5. **Reactiv la evenimente.** Poprirea rămâne activă pe încasări viitoare. Când intră salariul, core banking-ul notifică orchestratorul, iar agentul recalculează singur blocările.
 6. **Degradare controlată.** BNR indisponibil → cache → curs static marcat clar. PDF scanat → citire vizuală. Eroare de unealtă → agentul primește eroarea și se adaptează. Refuz al modelului → model de rezervă.
+7. **Protecție anti-fraudă.** Adresele de poprire și de ridicare falsificate sunt o metodă reală de a fura bani din conturi. Înainte să atingă vreun cont, *Authenticity Agent* rulează verificări deterministe: cifrele de control ale IBAN-ului, contul de Trezorerie pentru ANAF/primării, executorul în registrul public (extras simulat UNEJ), formatul dosarului, data. Apoi caută semnale în text: presiune de timp, e-mail personal. Codul nu îi permite să coboare verdictul sub riscul calculat determinist.
+8. **Măsurat, nu doar demonstrat.** Butonul *Evaluate* din header rulează toate scenariile cap-coadă și le compară cu rezultatele așteptate (rezultat, client, sumă). Afișează acuratețea, procentul de cazuri fără operator, timpul și costul pe caz. Panoul de impact de sub titlu arată aceleași cifre live pentru sesiunea curentă.
 
 ---
 
@@ -95,8 +98,9 @@ Le găsiți în dashboard, în meniul **Demos** din header. PDF-urile sunt în `
 | 09 | Fonduri insuficiente | Blocare parțială, apoi **Simulate an incoming payment** (salariu) → agentul se reactivează singur |
 | 10 | Document scanat | Fără strat de text → citire vizuală (imagine) |
 | 11 | Duplicat primit pe e-mail | Rulați-l după 01: nu blochează de două ori |
+| 12 | Poprire falsă (tentativă de fraudă) | Executor inexistent în registru, IBAN falsificat, e-mail personal: nu se blochează nimic, cazul merge la echipa antifraudă |
 
-**Ordine recomandată la stand (~5 minute):** 01 → 03 → 05 (răspundeți ca operator) → 09 + simulare salariu → 10. Țineți deschis tab-ul „Client & accounts” ca să se vadă cum se schimbă blocările. Istoricul cazurilor e în bara din stânga (mânerul galben o deschide/ascunde), iar butonul rotund din dreapta sus comută tema light/dark.
+**Ordine recomandată la stand (~6 minute):** 01 → 03 → 05 (răspundeți ca operator) → 12 (frauda oprită) → 09 + simulare salariu → 10. Cu o zi înainte rulați **Evaluate** și păstrați rezultatul pentru slide-ul de rezultate. Țineți deschis tab-ul „Client & accounts” ca să se vadă cum se schimbă blocările. Istoricul cazurilor e în bara din stânga (mânerul galben o deschide/ascunde), iar butonul rotund din dreapta sus comută tema light/dark.
 
 ---
 

@@ -3,7 +3,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from . import cnp
+from . import cnp, verification
 from .allocation import AllocationRequest, allocate
 from .legal_config import CLAIM_TYPES, DISCLAIMER, EXEMPT_SOURCES, INCOME_SOURCES, SAME_RANK_STRATEGY
 
@@ -35,6 +35,36 @@ def allocate_funds(body: AllocationRequest):
         return allocate(body)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+class IbanIn(BaseModel):
+    iban: str
+
+
+class DocumentCheckIn(BaseModel):
+    issuer_type: str
+    issuer_name: str | None = None
+    payment_iban: str | None = None
+    case_number: str | None = None
+    document_date: str | None = None
+
+
+@app.post("/verify/iban")
+def verify_iban(body: IbanIn):
+    return verification.verify_iban(body.iban)
+
+
+@app.get("/registry/bailiffs")
+def bailiff_registry(name: str = ""):
+    """Simulated snapshot of the public bailiff register (UNEJ)."""
+    matches = verification.find_bailiff(name) if name else verification.BAILIFF_REGISTRY
+    return {"source": "Simulated snapshot of the UNEJ public register (demo data)", "matches": matches}
+
+
+@app.post("/verify/document")
+def verify_document(body: DocumentCheckIn):
+    return verification.check_document(body.issuer_type, body.issuer_name, body.payment_iban,
+                                       body.case_number, body.document_date)
 
 
 @app.get("/rules")

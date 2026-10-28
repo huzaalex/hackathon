@@ -19,6 +19,13 @@ class Settings:
     data_dir: str = os.environ.get("DATA_DIR", "/data")
     bank_name: str = os.environ.get("BANK_NAME", "Banca Demo S.A.")
 
+    # Impact metrics: list price of the model (USD per million tokens) and the manual-work baseline.
+    # The baseline should come from the bank interview in docs/research.md.
+    price_input_per_mtok: float = float(os.environ.get("PRICE_INPUT_PER_MTOK", "4.0"))
+    price_output_per_mtok: float = float(os.environ.get("PRICE_OUTPUT_PER_MTOK", "20.0"))
+    manual_minutes_per_case: float = float(os.environ.get("MANUAL_MINUTES_PER_CASE", "20"))
+    operator_minutes_per_review: float = float(os.environ.get("OPERATOR_MINUTES_PER_REVIEW", "3"))
+
     @property
     def llm_base_url(self) -> str:
         # Claude in Amazon Bedrock, Messages API endpoint; the Bedrock API key is sent as a bearer token

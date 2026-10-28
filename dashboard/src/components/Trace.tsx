@@ -5,6 +5,7 @@ import { ExpandableText } from "./RichText";
 const AGENT_CLASS: Record<string, string> = {
   Supervisor: "a-sup",
   "Reader Agent": "a-cit",
+  "Authenticity Agent": "a-auth",
   "Identification Agent": "a-id",
   "Legal Agent": "a-jur",
   "Action Agent": "a-act",

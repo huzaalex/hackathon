@@ -1,4 +1,4 @@
-import { CaseSummary } from "../api";
+import { CaseSummary, EvalState } from "../api";
 import DemosMenu from "./DemosMenu";
 
 export type Theme = "light" | "dark";
@@ -8,9 +8,14 @@ interface Props {
   onToggleTheme: () => void;
   onReset: () => void;
   onCreated: (c: CaseSummary) => void;
+  evalState: EvalState | null;
+  onOpenEval: () => void;
 }
 
-export default function Header({ theme, onToggleTheme, onReset, onCreated }: Props) {
+export default function Header({ theme, onToggleTheme, onReset, onCreated, evalState, onOpenEval }: Props) {
+  const evalRunning = evalState?.status === "RUNNING";
+  const done = evalState?.summary?.completed ?? 0;
+  const total = evalState?.summary?.total ?? evalState?.items.length ?? 0;
   return (
     <header className="topbar">
       <div className="brand">
@@ -20,7 +25,13 @@ export default function Header({ theme, onToggleTheme, onReset, onCreated }: Pro
       </div>
       <nav className="topbar-right" aria-label="Main">
         <DemosMenu onCreated={onCreated} />
-        <button className="btn ghost" onClick={onReset}>Reset Demo</button>
+        <button className={`btn ghost eval-btn ${evalRunning ? "running" : ""}`} onClick={onOpenEval}>
+          {evalRunning && <span className="live-dot" aria-hidden />}
+          {evalRunning ? `Evaluating ${done}/${total}` : "Evaluate"}
+        </button>
+        <button className="btn ghost" onClick={onReset} disabled={evalRunning} title={evalRunning ? "Wait for the evaluation to finish" : undefined}>
+          Reset Demo
+        </button>
         <button
           className="icon-btn theme-toggle"
           onClick={onToggleTheme}

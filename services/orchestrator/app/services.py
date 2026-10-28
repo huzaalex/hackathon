@@ -94,6 +94,12 @@ class RulesEngine:
     async def rules(self):
         return await _call("rules-engine", "GET", f"{self.base}/rules")
 
+    async def verify_document(self, body):
+        return await _call("rules-engine", "POST", f"{self.base}/verify/document", json=body)
+
+    async def bailiff_registry(self, name):
+        return await _call("rules-engine", "GET", f"{self.base}/registry/bailiffs", params={"name": name})
+
 
 class Documents:
     base = settings.document_service_url

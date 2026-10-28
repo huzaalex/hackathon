@@ -77,12 +77,14 @@ def _safe(fn: Callable | None, arg: Any, default: str) -> str:
 class Agent:
     def __init__(self, key: str, label: str, system: str, tools: list[Tool], effort: str,
                  result_schema: dict | None = None, terminal_tool: str = TERMINAL_TOOL, max_turns: int = 14,
-                 describe_result: Callable[[dict], str] | None = None):
+                 describe_result: Callable[[dict], str] | None = None,
+                 guard: Callable[[Case, dict], dict] | None = None):
         self.key, self.label, self.system, self.effort, self.max_turns = key, label, system, effort, max_turns
         self.tools = {t.name: t for t in tools}
         self.result_schema = result_schema
         self.terminal_tool = terminal_tool
         self.describe_result = describe_result
+        self.guard = guard  # deterministic post-check that may tighten the agent's result (code over LLM)
         specs = [t.spec() for t in tools]
         if result_schema is not None:
             specs.append({"name": terminal_tool, "description": "Submit the final structured result. Call it exactly once, at the end.",

@@ -231,13 +231,13 @@ def render(flowables) -> bytes:
 
 
 def executor_doc(*, bej, bej_address, case_ref, reg_no, debtor, cnp, address, amount, creditor, title, claim_desc,
-                 creditor_iban, banner=None, lift_of=None):
+                 creditor_iban, banner=None, lift_of=None, contact="Tel. 021 300 00 00 · bej@example.ro", extra=None):
     f = []
     if banner:
         f.append(Paragraph(banner, SMALL))
     f += [
         Paragraph(f"BIROUL EXECUTORULUI JUDECĂTORESC {bej.upper()}", HEADER),
-        Paragraph(f"Sediul: {bej_address} · Tel. 021 300 00 00 · bej@example.ro", SMALL),
+        Paragraph(f"Sediul: {bej_address} · {contact}", SMALL),
         Spacer(1, 6),
         Paragraph(f"Dosar de executare nr. <b>{case_ref}</b>", STYLE),
         Paragraph(f"Nr. {reg_no} din {doc_date()}", STYLE),
@@ -270,6 +270,8 @@ def executor_doc(*, bej, bej_address, case_ref, reg_no, debtor, cnp, address, am
                 "Fac excepție sumele exceptate de la urmărire potrivit legii.", STYLE),
             Paragraph("Vă rugăm să ne comunicați, în termenul legal, dacă debitorul deține conturi și sumele indisponibilizate.", STYLE),
         ]
+    if extra:
+        f.append(Paragraph(extra, STYLE))
     f += [Spacer(1, 16), Paragraph(f"Executor judecătoresc,<br/><b>{bej}</b><br/>(semnătură și ștampilă)", STYLE)]
     return render(f)
 
@@ -334,8 +336,14 @@ def scanned(pdf_bytes: bytes) -> bytes:
 
 # ---------------------------------------------------------------- scenarios
 
+def iban_for(bank: str, account16: str) -> str:
+    """Romanian IBAN with correct check digits for a given bank code and 16-character account."""
+    numeric = "".join(str(int(c, 36)) for c in bank + account16 + "RO00")
+    return f"RO{98 - int(numeric) % 97:02d}{bank}{account16}"
+
+
 BEJ_M = dict(bej="Marinescu Ovidiu", bej_address="Str. Doamnei nr. 9, Sector 3, București")
-CONSEMNARE = "RO49AAAA1B31007593840000"
+CONSEMNARE = iban_for("CECE", "B310075938400000")  # bailiff consignment account at CEC Bank
 scenarios = []
 
 if DOCS.exists():
@@ -364,7 +372,7 @@ scenario("02_anaf_cnp_gresit.pdf", "Tax authority (ANAF) - CNP with one wrong di
          "The agent detects the invalid check digit, finds the right client and applies the garnishment (2,300 RON).",
          anaf_doc(unit="Administrația Județeană a Finanțelor Publice Cluj", case_ref="AJFP-CJ/90321/2026", reg_no="CJ-77120",
                   debtor=full(maria), cnp=corrupt_cnp(maria["cnp"]), address=maria["address"], amount=2300,
-                  title="decizia de impunere nr. 4410/2025", treasury_iban="RO12TREZ2165067XXX012345"))
+                  title="decizia de impunere nr. 4410/2025", treasury_iban=iban_for("TREZ", "2165067XXX012345")))
 
 scenario("03_salariu_si_alocatie.pdf", "Account with salary + child allowance",
          "Elena Dumitrescu received her salary and her child allowance. Debt of 4,000 RON.",
@@ -408,7 +416,7 @@ scenario("08_primarie_cont_euro.pdf", "Local tax authority - EUR account",
          "The agent fetches the official exchange rate of the day and holds the EUR equivalent.",
          primarie_doc(sector=1, case_ref="DGITL-S1/12004/2026", reg_no="44018", debtor=full(ana), cnp=ana["cnp"], address=ana["address"],
                       amount=6000, details="Impozit pe clădiri 2024–2025, taxă auto, majorări de întârziere",
-                      iban="RO77TREZ7015007XXX008899"))
+                      iban=iban_for("TREZ", "7015007XXX008899")))
 
 scenario("09_fonduri_insuficiente.pdf", "Insufficient funds + future credit",
          "Mihai Radu has only 150 RON. Debt of 3,500 RON.",
@@ -431,6 +439,40 @@ scenario("11_duplicat_email.pdf", "Duplicate (same garnishment, also received by
                       amount=5000, creditor="SC TelcoNet Romania SA", title="contractul de abonament nr. 88412/2024, învestit cu formulă executorie",
                       claim_desc="facturi de telefonie neachitate", creditor_iban=CONSEMNARE,
                       banner="COPIE – document transmis și prin e-mail la executari@bancademo.ro"))
+
+# A forged order: bailiff not in the public register, IBAN with wrong check digits, personal e-mail, pressure to pay fast
+_real = iban_for("BTRL", "RONCRT0412345678")
+FORGED_IBAN = f"RO{(int(_real[2:4]) + 7) % 97:02d}{_real[4:]}"
+scenario("12_poprire_falsa.pdf", "Forged garnishment order (fraud attempt)",
+         "A letter that looks like a bailiff's garnishment order for Vasile Georgescu, but it is a fraud attempt.",
+         "The Authenticity Agent finds the bailiff is not in the public register and the IBAN is forged; nothing is held and the case goes to the fraud team.",
+         executor_doc(bej="Popovici Dan", bej_address="Str. Lânăriei nr. 4, Sector 4, București", case_ref="EX-77/2026", reg_no="311",
+                      debtor=full(vasile), cnp=vasile["cnp"], address=vasile["address"], amount=9800,
+                      creditor="SC Recuperări Rapide SRL", title="contractul de cesiune nr. 12/2026",
+                      claim_desc="debit cesionat și penalități", creditor_iban=FORGED_IBAN,
+                      contact="Tel. 0745 000 111 · executor.popovici.dan@gmail.com",
+                      extra="Având în vedere caracterul urgent, vă solicităm virarea integrală a sumei <b>în termen de 24 de ore</b>, "
+                            "fără notificarea prealabilă a debitorului, în contul executorului indicat mai sus."))
+
+# Golden expectations used by the evaluation run (client None = must not be a client; key absent = not checked)
+EVAL = {
+    "01_executor_simplu.pdf": {"outcomes": ["GARNISHMENT_APPLIED_FULL"], "client": "CL001", "held_ron": 5000},
+    "02_anaf_cnp_gresit.pdf": {"outcomes": ["GARNISHMENT_APPLIED_FULL"], "client": "CL002", "held_ron": 2300},
+    "03_salariu_si_alocatie.pdf": {"outcomes": ["GARNISHMENT_APPLIED_PARTIAL"], "client": "CL003", "held_ron": 1700},
+    "04_pensie_alimentara.pdf": {"outcomes": ["GARNISHMENT_APPLIED_PARTIAL"], "client": "CL004", "held_ron": 2550},
+    "05_omonim_ambiguu.pdf": {"outcomes": ["GARNISHMENT_APPLIED_FULL"], "client": "CL005", "held_ron": 1200,
+                              "operator_answer": "It is CL005 - Andrei Popa, Str. Florilor nr. 12, Sector 3 (confirmed with the bailiff)."},
+    "06_ridicare_poprire.pdf": {"outcomes": ["GARNISHMENT_RELEASED"], "client": "CL007"},
+    "07_debitor_inexistent.pdf": {"outcomes": ["DEBTOR_NOT_CLIENT"], "client": None, "held_ron": 0},
+    "08_primarie_cont_euro.pdf": {"outcomes": ["GARNISHMENT_APPLIED_FULL"], "client": "CL008", "held_ron": 6000},
+    "09_fonduri_insuficiente.pdf": {"outcomes": ["GARNISHMENT_APPLIED_PARTIAL", "NO_FUNDS"], "client": "CL009", "held_ron": 150},
+    "10_scanat.pdf": {"outcomes": ["GARNISHMENT_APPLIED_FULL"], "client": "CL010", "held_ron": 1500},
+    "11_duplicat_email.pdf": {"outcomes": ["DUPLICATE"], "client": "CL001", "held_ron": 0},
+    "12_poprire_falsa.pdf": {"outcomes": ["SUSPECTED_FRAUD"], "held_ron": 0,
+                             "operator_answer": "Reject: treat it as suspected fraud and forward it to the fraud team."},
+}
+for s_ in scenarios:
+    s_["eval"] = EVAL[s_["file"]]
 
 
 def main():

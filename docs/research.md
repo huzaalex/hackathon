@@ -37,3 +37,13 @@ Un singur citat real în prezentare valorează mult.
 4. **Demo live** (vezi ordinea recomandată în README).
 5. **Inginerie:** microservicii, Docker, teste la build, blackboard, human-in-the-loop, degradare controlată.
 6. **Impact și pași următori:** timp economisit, audit complet al fiecărei decizii, integrare cu sistemele reale.
+
+## 4. Cifrele folosite de panoul de impact
+
+Panoul de impact și evaluarea folosesc câteva ipoteze, configurabile în `.env`. Înlocuiți primele două cu cifrele din interviul de la secțiunea 2:
+
+| Variabilă | Valoare implicită | Ce înseamnă |
+|---|---|---|
+| `MANUAL_MINUTES_PER_CASE` | 20 | Cât durează azi procesarea manuală a unei adrese de poprire |
+| `OPERATOR_MINUTES_PER_REVIEW` | 3 | Cât îi ia unui operator să răspundă la o întrebare a agentului |
+| `PRICE_INPUT_PER_MTOK` / `PRICE_OUTPUT_PER_MTOK` | 4 / 20 USD | Prețul de listă al modelului (Bedrock poate diferi) |
