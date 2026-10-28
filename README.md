@@ -15,22 +15,22 @@ Băncile primesc zilnic adrese de poprire de la executori judecătorești, ANAF 
                       │  Dashboard (React, :3000)  │  upload, trace live (SSE), coadă operator
                       └─────────────┬──────────────┘
                                     │ /api  (nginx → orchestrator)
-                      ┌─────────────▼──────────────┐
-                      │   ORCHESTRATOR (:8000)     │  Claude Opus 5.5 pe Amazon Bedrock
-                      │   Supervizor  ─┬─ Citire   │  tool calling, buclă agentică proprie,
-                      │                ├─ Autentic.│  pauză/reluare pentru operator uman,
-                      │                ├─ Identif. │  blackboard partajat între agenți
-                      │                ├─ Juridic  │
-                      │                └─ Acțiune  │
+                      ┌─────────────▼───────────────┐
+                      │   ORCHESTRATOR (:8000)      │  Claude Opus 5.5 pe Amazon Bedrock
+                      │   Supervizor  ─┬─ Citire    │  tool calling, buclă agentică proprie,
+                      │                ├─ Autentic. │  pauză/reluare pentru operator uman,
+                      │                ├─ Identif.  │  blackboard partajat între agenți
+                      │                ├─ Juridic   │
+                      │                └─ Acțiune   │
                       └──┬─────────┬─────────┬─────┬┘
-          ┌──────────────▼─┐ ┌─────▼──────┐ ┌▼──────────┐ ┌▼───────────┐
-          │ core-banking   │ │ rules-     │ │ document- │ │ fx-service │
-          │ (:8001)        │ │ engine     │ │ service   │ │ (:8004)    │
-          │ clienți,conturi│ │ (:8002)    │ │ (:8003)   │ │ curs BNR   │
+          ┌──────────────▼─┐ ┌─────▼───────┐ ┌▼──────────┐ ┌▼────────────┐
+          │ core-banking   │ │ rules-      │ │ document- │ │ fx-service  │
+          │ (:8001)        │ │ engine      │ │ service   │ │ (:8004)     │
+          │ clienți,conturi│ │ (:8002)     │ │ (:8003)   │ │ curs BNR    │
           │ popriri,blocări│ │ CNP, alocare│ │ PDF→text/ │ │ real + cache│
-          │ PostgreSQL     │ │ legală     │ │ imagine,  │ │ + fallback │
-          └───────┬────────┘ │ + teste    │ │ scrisori  │ └────────────┘
-                  │ webhook  └────────────┘ └───────────┘
+          │ PostgreSQL     │ │ legală      │ │ imagine,  │ │ + fallback  │
+          └───────┬────────┘ │ + teste     │ │ scrisori  │ └─────────────┘
+                  │ webhook  └─────────────┘ └───────────┘
                   └──► orchestrator: „a intrat salariul unui debitor” → caz nou, automat
 ```
 
@@ -100,8 +100,6 @@ Le găsiți în dashboard, în meniul **Demos** din header. PDF-urile sunt în `
 | 11 | Duplicat primit pe e-mail | Rulați-l după 01: nu blochează de două ori |
 | 12 | Poprire falsă (tentativă de fraudă) | Executor inexistent în registru, IBAN falsificat, e-mail personal: nu se blochează nimic, cazul merge la echipa antifraudă |
 
-**Ordine recomandată la stand (~6 minute):** 01 → 03 → 05 (răspundeți ca operator) → 12 (frauda oprită) → 09 + simulare salariu → 10. Cu o zi înainte rulați **Evaluate** și păstrați rezultatul pentru slide-ul de rezultate. Țineți deschis tab-ul „Client & accounts” ca să se vadă cum se schimbă blocările. Istoricul cazurilor e în bara din stânga (mânerul galben o deschide/ascunde), iar butonul rotund din dreapta sus comută tema light/dark.
-
 ---
 
 ## Structura repo-ului
@@ -129,15 +127,6 @@ Le găsiți în dashboard, în meniul **Demos** din header. PDF-urile sunt în `
 ├── dashboard/                 # React + Vite + TypeScript, servit de nginx
 └── docs/research.md           # ce trebuie verificat juridic + întrebări pentru bancheri
 ```
-
-## Lucru în echipă (24h)
-
-| Cine | Zonă | Fișiere principale |
-|---|---|---|
-| A | Agenți și prompturi, tuning pe scenarii | `services/orchestrator/app/agents.py`, `runtime.py` |
-| B | Reguli legale, teste, cercetare juridică | `services/rules-engine/`, `docs/research.md` |
-| C | Date sintetice, scenarii noi, documente | `data-generator/`, `services/document-service/` |
-| D | Dashboard, demo, prezentare | `dashboard/`, `README.md` |
 
 Contractele dintre servicii sunt API-uri HTTP documentate automat la `/docs`, deci fiecare zonă se poate modifica independent.
 
