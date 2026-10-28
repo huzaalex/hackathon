@@ -1,1 +1,1 @@
-print("Cf HUZA")
+hello world ("print")
