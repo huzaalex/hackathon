@@ -1,0 +1,91 @@
+name: poprire-agent
+
+x-python-service: &python-service
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bank
+      POSTGRES_PASSWORD: bank
+      POSTGRES_DB: bank
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bank -d bank"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Runs once at startup: writes seed.json + demo PDFs into ./data
+  data-generator:
+    build: ./data-generator
+    volumes:
+      - ./data:/data
+    restart: "no"
+
+  core-banking:
+    <<: *python-service
+    build: ./services/core-banking
+    environment:
+      DATABASE_URL: postgresql+psycopg://bank:bank@postgres:5432/bank
+      SEED_PATH: /data/seed.json
+      ORCHESTRATOR_URL: http://orchestrator:8000
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      data-generator:
+        condition: service_completed_successfully
+
+  rules-engine:
+    <<: *python-service
+    build: ./services/rules-engine
+    ports:
+      - "8002:8000"
+
+  document-service:
+    <<: *python-service
+    build: ./services/document-service
+    ports:
+      - "8003:8000"
+
+  fx-service:
+    <<: *python-service
+    build: ./services/fx-service
+    ports:
+      - "8004:8000"
+
+  orchestrator:
+    <<: *python-service
+    build: ./services/orchestrator
+    env_file: .env
+    environment:
+      CORE_BANKING_URL: http://core-banking:8000
+      RULES_ENGINE_URL: http://rules-engine:8000
+      DOCUMENT_SERVICE_URL: http://document-service:8000
+      FX_SERVICE_URL: http://fx-service:8000
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      - core-banking
+      - rules-engine
+      - document-service
+      - fx-service
+
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      - orchestrator
+
+volumes:
+  pgdata:
