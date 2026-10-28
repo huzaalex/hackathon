@@ -4,6 +4,7 @@ import Trace from "./Trace";
 import Blackboard from "./Blackboard";
 import ClientPanel from "./ClientPanel";
 import ReviewPanel from "./ReviewPanel";
+import { ExpandableText } from "./RichText";
 
 type Tab = "trace" | "data" | "client";
 
@@ -58,7 +59,12 @@ export default function CaseView({ caseId }: { caseId: string }) {
         </div>
       </div>
 
-      {detail.summary && <div className="summary">{detail.summary}</div>}
+      {detail.summary && (
+        <div className="summary">
+          <span className="rt-head">Case summary</span>
+          <ExpandableText text={detail.summary} limit={420} />
+        </div>
+      )}
       {detail.status === "NEEDS_REVIEW" && detail.review && (
         <ReviewPanel caseId={detail.id} review={detail.review} onAnswered={() => api.caseDetail(caseId).then(setDetail)} />
       )}

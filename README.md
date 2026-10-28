@@ -80,7 +80,7 @@ La fiecare `docker compose up`, `data-generator` regenerează datele sintetice �
 
 ## Scenarii de demo
 
-Le găsiți în dashboard, în stânga, cu butonul Run. PDF-urile sunt în `./data/popriri/`.
+Le găsiți în dashboard, în meniul **Demos** din header. PDF-urile sunt în `./data/popriri/`.
 
 | # | Scenariu | Ce demonstrează |
 |---|---|---|
@@ -96,7 +96,7 @@ Le găsiți în dashboard, în stânga, cu butonul Run. PDF-urile sunt în `./da
 | 10 | Document scanat | Fără strat de text → citire vizuală (imagine) |
 | 11 | Duplicat primit pe e-mail | Rulați-l după 01: nu blochează de două ori |
 
-**Ordine recomandată la stand (~5 minute):** 01 → 03 → 05 (răspundeți ca operator) → 09 + simulare salariu → 10. Țineți deschis tab-ul „Client & accounts” ca să se vadă cum se schimbă blocările.
+**Ordine recomandată la stand (~5 minute):** 01 → 03 → 05 (răspundeți ca operator) → 09 + simulare salariu → 10. Țineți deschis tab-ul „Client & accounts” ca să se vadă cum se schimbă blocările. Istoricul cazurilor e în bara din stânga (mânerul galben o deschide/ascunde), iar butonul rotund din dreapta sus comută tema light/dark.
 
 ---
 

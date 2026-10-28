@@ -17,7 +17,9 @@ NULLABLE_STR = {"type": ["string", "null"]}
 
 LANGUAGE_RULE = ("Write everything (reasoning, messages, instructions, results) in clear English. "
                  "Source documents are in Romanian: copy names, addresses and reference numbers exactly as written, "
-                 "but describe them in English. Never use emojis.")
+                 "but describe them in English. Never mix Romanian words into English sentences "
+                 "(write \"letter 5521 of 27.10.2026\", not \"5521 din 27.10.2026\"). Never use emojis. "
+                 "Keep free-text fields short and organised: one idea per sentence, and put distinct points on separate lines.")
 
 CLAIM_LABEL = {"CHILD_SUPPORT": "child support", "WAGE": "wage claim", "TAX": "tax claim", "UNSECURED": "other (unsecured) claim",
                "UNKNOWN": "unknown claim type"}
@@ -108,9 +110,11 @@ def describe_document(d: dict) -> str:
     if d.get("case_number"):
         parts.append(f"Case number {d['case_number']}.")
     parts.append(f"Claim type: {CLAIM_LABEL.get(d.get('claim_type'), d.get('claim_type'))}. Confidence {pct(d.get('confidence'))}.")
-    if d.get("issues"):
-        parts.append("Issues: " + "; ".join(d["issues"]))
-    return " ".join(parts)
+    text = "\n".join(parts)
+    issues = [i.strip().rstrip(".;") for i in d.get("issues") or [] if i.strip() and not i.lower().startswith("no issue")]
+    if issues:
+        text += "\n\nIssues:\n" + "\n".join(f"- {i}." for i in issues)
+    return text
 
 
 EXTRACTION_SCHEMA = schema({
@@ -131,7 +135,8 @@ EXTRACTION_SCHEMA = schema({
     "released_reference": {**NULLABLE_STR, "description": "for releases only: the garnishment/letter being released"},
     "cnp_valid": {"type": ["boolean", "null"]},
     "confidence": {"type": "number", "description": "between 0 and 1"},
-    "issues": {"type": "array", "items": {"type": "string"}, "description": "in English"},
+    "issues": {"type": "array", "items": {"type": "string"},
+               "description": "only real problems (unreadable or missing fields, inconsistencies), in English; empty list if none"},
 })
 
 reader = Agent(
@@ -199,7 +204,7 @@ def describe_identification(r: dict) -> str:
         text = f"Ambiguous: {len(r.get('candidates', []))} possible clients ({ids})."
     else:
         text = "The debtor is not a client of the bank."
-    return f"{text} {r.get('reasoning', '')}".strip()
+    return f"{text}\n\n{r.get('reasoning', '')}".strip()
 
 
 IDENTIFICATION_SCHEMA = schema({
@@ -377,13 +382,13 @@ LEGAL_SCHEMA = schema({
     "claim_type": {"type": ["string", "null"], "enum": CLAIM_TYPES + [None]},
     "garnishment_to_release": NULLABLE_STR,
     "duplicate_of": NULLABLE_STR,
-    "summary": {"type": "string", "description": "plain-English explanation for the operator: what is protected, what is held and why"},
+    "summary": {"type": "string", "description": "plain-English explanation for the operator in 2 to 4 short sentences, one point per line: what is protected, what is held and why"},
     "legal_basis": {"type": "array", "items": {"type": "string"}},
 })
 
 legal = Agent(
     key="legal", label="Legal Agent", effort=settings.llm_effort, result_schema=LEGAL_SCHEMA,
-    describe_result=lambda r: f"Decision: {DECISION_LABEL.get(r.get('decision'), r.get('decision'))}. {r.get('summary', '')}",
+    describe_result=lambda r: f"Decision: {DECISION_LABEL.get(r.get('decision'), r.get('decision'))}.\n\n{r.get('summary', '')}",
     system=f"""You are the LEGAL AGENT. You decide what must legally be done for the identified client.
 You do NOT compute amounts: you use compute_allocation, which calls a deterministic rules engine.
 
@@ -550,7 +555,7 @@ ACTION_SCHEMA = schema({
 
 action = Agent(
     key="actions", label="Action Agent", effort=settings.llm_subagent_effort, result_schema=ACTION_SCHEMA,
-    describe_result=lambda r: r.get("summary", "") + (" Issues: " + "; ".join(r["issues"]) if r.get("issues") else ""),
+    describe_result=lambda r: r.get("summary", "") + ("\n\nIssues:\n" + "\n".join(f"- {i}" for i in r["issues"]) if r.get("issues") else ""),
     system=f"""You are the ACTION AGENT. You execute the legal agent's decision in core banking and reply to the issuer.
 You never change or invent amounts: you apply exactly the plan computed by the rules engine.
 
@@ -615,7 +620,9 @@ async def t_ask_human(case: Case, inp):
 OUTCOMES = ["GARNISHMENT_APPLIED_FULL", "GARNISHMENT_APPLIED_PARTIAL", "NO_FUNDS", "DEBTOR_NOT_CLIENT", "DUPLICATE",
             "GARNISHMENT_RELEASED", "REEVALUATION_APPLIED", "REJECTED_BY_OPERATOR", "DOCUMENT_NOT_PROCESSABLE"]
 
-CLOSE_SCHEMA = schema({"outcome": {"type": "string", "enum": OUTCOMES}, "summary": {"type": "string"}})
+CLOSE_SCHEMA = schema({"outcome": {"type": "string", "enum": OUTCOMES}, "summary": {
+    "type": "string",
+    "description": "3 to 5 short paragraphs separated by a blank line, each starting with a label: Document:, Debtor:, Decision:, Actions:, Follow-up:"}})
 
 supervisor = Agent(
     key="supervisor", label="Supervisor", effort=settings.llm_effort, result_schema=CLOSE_SCHEMA, terminal_tool="close_case",
@@ -645,6 +652,9 @@ How you work:
   already identified. Ask legal_agent to re-evaluate, then action_agent to apply the plan.
 - Before closing a case that has a document, make sure the issuer got a reply (letter generated).
 - Before each delegation, write one short sentence saying what you are doing and why. It is shown live to operators.
+- The close_case summary is read by bank staff. Write 3 to 5 short paragraphs separated by a blank line, each
+  starting with a label: "Document:", "Debtor:", "Decision:", "Actions:", "Follow-up:" (skip labels that do not apply).
+  Two sentences at most per paragraph; mention account numbers only when they matter.
 {LANGUAGE_RULE}""",
     tools=[
         *[Tool(name, f"Delegate a task to the {a.label}. Its result is saved on the blackboard.",

@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { AgentEvent, OUTCOME_LABEL, STATUS_LABEL, CaseStatus } from "../api";
+import { ExpandableText } from "./RichText";
 
 const AGENT_CLASS: Record<string, string> = {
   Supervisor: "a-sup",
@@ -11,37 +12,78 @@ const AGENT_CLASS: Record<string, string> = {
   System: "a-sys",
 };
 
+const NEAR_BOTTOM_PX = 48;
+
 export default function Trace({ events, running }: { events: AgentEvent[]; running: boolean }) {
-  const end = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
   const [technical, setTechnical] = useState(false);
+  const [unseen, setUnseen] = useState(0);
 
+  // Follow mode scrolls only inside the trace panel, never the page, so the user can always scroll freely.
   useEffect(() => {
-    if (follow) end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [events.length, follow]);
+    const el = box.current;
+    if (!el) return;
+    if (follow) {
+      el.scrollTop = el.scrollHeight;
+      setUnseen(0);
+    } else {
+      setUnseen((n) => n + 1);
+    }
+  }, [events.length]);
+
+  // Scrolling up inside the panel pauses following; scrolling back to the bottom resumes it.
+  const onScroll = () => {
+    const el = box.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    if (atBottom !== follow) setFollow(atBottom);
+    if (atBottom) setUnseen(0);
+  };
+
+  const jumpToLatest = () => {
+    const el = box.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setFollow(true);
+    setUnseen(0);
+  };
 
   return (
     <div className="trace">
       <div className="trace-controls">
         <label>
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow live
+          <input type="checkbox" checked={follow} onChange={(e) => (e.target.checked ? jumpToLatest() : setFollow(false))} /> Follow live
         </label>
         <label>
           <input type="checkbox" checked={technical} onChange={(e) => setTechnical(e.target.checked)} /> Show technical details
         </label>
       </div>
-      {events.map((ev) =>
-        ev.type === "agent_start" ? (
-          <div key={ev.seq} className="divider">
-            <span className={`agent ${AGENT_CLASS[ev.agent] ?? "a-sys"}`}>{ev.agent}</span>
-            <span>started working</span>
+      <div className="trace-scroll" ref={box} onScroll={onScroll}>
+        {events.map((ev) =>
+          ev.type === "agent_start" ? (
+            <div key={ev.seq} className="divider">
+              <span className={`agent ${AGENT_CLASS[ev.agent] ?? "a-sys"}`}>{ev.agent}</span>
+              <span>started working</span>
+            </div>
+          ) : (
+            <EventRow key={ev.seq} ev={ev} technical={technical} />
+          ),
+        )}
+        {running && (
+          <div className="typing" role="status">
+            <span className="dots" aria-hidden><i /><i /><i /></span>
+            The agents are working
           </div>
-        ) : (
-          <EventRow key={ev.seq} ev={ev} technical={technical} />
-        ),
-      )}
-      {running && <div className="typing">The agents are working…</div>}
-      <div ref={end} />
+        )}
+        {!follow && unseen > 0 && (
+          <button type="button" className="jump-latest" onClick={jumpToLatest}>
+            {unseen} new update{unseen > 1 ? "s" : ""} · Jump to latest
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden>
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -57,7 +99,7 @@ function EventRow({ ev, technical }: { ev: AgentEvent; technical: boolean }) {
       body = (
         <div className="thinking">
           <span className="tag">Thinking</span>
-          <Collapsible text={text} limit={320} />
+          <ExpandableText text={text} limit={200} />
         </div>
       );
       break;
@@ -65,7 +107,7 @@ function EventRow({ ev, technical }: { ev: AgentEvent; technical: boolean }) {
       body = <p className="say">{text}</p>;
       break;
     case "tool_call":
-      body = <p className={d.tool?.endsWith("_agent") ? "delegate" : "action"}>{text}</p>;
+      body = d.tool?.endsWith("_agent") ? <ExpandableText className="delegate" text={text} limit={220} /> : <p className="action">{text}</p>;
       raw = { tool: d.tool, input: d.input };
       break;
     case "tool_result":
@@ -79,19 +121,19 @@ function EventRow({ ev, technical }: { ev: AgentEvent; technical: boolean }) {
       break;
     case "agent_result":
       body = (
-        <p className="agent-result">
-          <strong>Result: </strong>
-          {text}
-        </p>
+        <div className="agent-result">
+          <span className="rt-head">Result</span>
+          <ExpandableText text={text} limit={200} />
+        </div>
       );
       raw = d.result;
       break;
     case "review_requested":
       body = (
-        <p className="review-req">
-          <strong>Asked a human operator: </strong>
-          {d.question ?? text}
-        </p>
+        <div className="review-req">
+          <span className="rt-head">Asked a human operator</span>
+          <ExpandableText text={d.question ?? text} limit={240} />
+        </div>
       );
       break;
     case "review_answered":
@@ -105,8 +147,8 @@ function EventRow({ ev, technical }: { ev: AgentEvent; technical: boolean }) {
     case "case_finished":
       body = (
         <div className="finished">
-          <strong>Case closed: {OUTCOME_LABEL[d.outcome] ?? d.outcome}</strong>
-          <p>{d.summary}</p>
+          <span className="rt-head">Case closed: {OUTCOME_LABEL[d.outcome] ?? d.outcome}</span>
+          <ExpandableText text={d.summary ?? ""} limit={240} />
         </div>
       );
       break;
@@ -140,17 +182,5 @@ function EventRow({ ev, technical }: { ev: AgentEvent; technical: boolean }) {
         )}
       </div>
     </div>
-  );
-}
-
-function Collapsible({ text, limit }: { text: string; limit: number }) {
-  const [open, setOpen] = useState(false);
-  if (!text) return null;
-  if (text.length <= limit) return <span>{text}</span>;
-  return (
-    <span>
-      {open ? text : text.slice(0, limit) + "… "}
-      <button className="linkbtn" onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>
-    </span>
   );
 }

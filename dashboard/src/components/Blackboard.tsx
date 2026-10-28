@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { CLAIM_LABEL, fmtMoney, humanize } from "../api";
+import { RichText } from "./RichText";
 
 const DOC_TYPE: Record<string, string> = {
   GARNISHMENT_ORDER: "Garnishment order",
@@ -60,7 +61,7 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
   return (
     <div className="blackboard">
       {event && (
-        <Card title="Core banking event">
+        <Card title="Core banking event" tone="indigo">
           <p>
             Incoming payment of {fmtMoney(event.amount, event.currency)} on account <code>{event.iban}</code> (source:{" "}
             {humanize(event.source)}) for client {event.client_id}.
@@ -69,7 +70,7 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
       )}
 
       {doc && (
-        <Card title="1 · Extracted document (Reader Agent)">
+        <Card title="1 · Extracted document (Reader Agent)" tone="indigo">
           {data.text_extraction && (
             <p className="muted small">
               {data.text_extraction.text_layer ? "PDF with a text layer" : "Scanned PDF - read visually"} ·{" "}
@@ -93,13 +94,13 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
       )}
 
       {id && (
-        <Card title="2 · Debtor identification (Identification Agent)">
+        <Card title="2 · Debtor identification (Identification Agent)" tone="teal">
           <p>
             <span className={`badge id-${id.status}`}>{humanize(id.status)}</span>{" "}
             {id.client_id && <strong>{id.client_id}</strong>} <span className="muted">confidence {percent(id.confidence)}</span>
           </p>
           {id.corrected_cnp && <p>Corrected CNP: <code>{id.corrected_cnp}</code></p>}
-          <p>{id.reasoning}</p>
+          {id.reasoning && <RichText text={id.reasoning} />}
           {id.candidates?.length > 0 && (
             <ul>{id.candidates.map((c: any) => <li key={c.client_id}><strong>{c.client_id}</strong>: {c.reason}</li>)}</ul>
           )}
@@ -107,12 +108,12 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
       )}
 
       {legal && (
-        <Card title="3 · Legal decision (Legal Agent)">
+        <Card title="3 · Legal decision (Legal Agent)" tone="plum">
           <p>
             <span className="badge">{humanize(legal.decision, DECISION)}</span>{" "}
             {legal.claim_type && <span className="pill">{humanize(legal.claim_type, CLAIM_LABEL)}</span>}
           </p>
-          <p>{legal.summary}</p>
+          {legal.summary && <RichText text={legal.summary} />}
           {legal.legal_basis?.length > 0 && (
             <ul className="legal">{legal.legal_basis.map((t: string, i: number) => <li key={i}>{t}</li>)}</ul>
           )}
@@ -120,7 +121,7 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
       )}
 
       {plan && (
-        <Card title="Hold plan (deterministic rules engine)">
+        <Card title="Hold plan (deterministic rules engine)" tone="yellow">
           <ol className="explain">{plan.explanation.map((l: string, i: number) => <li key={i}>{l}</li>)}</ol>
           <table className="grid">
             <thead>
@@ -156,7 +157,7 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
       )}
 
       {(actions || letter || registered || applied || release) && (
-        <Card title="4 · Actions executed (Action Agent)">
+        <Card title="4 · Actions executed (Action Agent)" tone="green">
           <ul>
             {registered && <li>Garnishment registered in core banking as <strong>{registered.id}</strong>.</li>}
             {applied && <li>Hold plan applied: {fmtMoney(applied.total_ron)} held in {applied.holds?.length ?? 0} hold(s).</li>}
@@ -172,7 +173,7 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
               </li>
             )}
           </ul>
-          {actions?.summary && <p>{actions.summary}</p>}
+          {actions?.summary && <RichText text={actions.summary} />}
           {actions?.issues?.length > 0 && (
             <ul className="issues">{actions.issues.map((p: string, i: number) => <li key={i}>{p}</li>)}</ul>
           )}
@@ -190,9 +191,9 @@ export default function Blackboard({ data }: { data: Record<string, any> }) {
   );
 }
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+function Card({ title, tone = "yellow", children }: { title: string; tone?: string; children: ReactNode }) {
   return (
-    <section className="card">
+    <section className={`card tone-${tone}`}>
       <h4>{title}</h4>
       {children}
     </section>

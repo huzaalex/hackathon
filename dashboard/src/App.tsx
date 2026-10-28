@@ -1,14 +1,31 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, CaseSummary } from "./api";
-import Sidebar from "./components/Sidebar";
-import CaseList from "./components/CaseList";
+import { loadPref, savePref } from "./prefs";
+import Header, { Theme } from "./components/Header";
+import CasesSidebar from "./components/CasesSidebar";
+import UploadZone from "./components/UploadZone";
+import Steps from "./components/Steps";
 import CaseView from "./components/CaseView";
 
+const initialTheme = (): Theme =>
+  (document.documentElement.dataset.theme as Theme) ||
+  (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [casesOpen, setCasesOpen] = useState<boolean>(() => loadPref("cases-open", window.innerWidth > 1000) === true);
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [model, setModel] = useState<string>("");
+  const [model, setModel] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const detailRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    savePref("theme", theme);
+  }, [theme]);
+
+  useEffect(() => savePref("cases-open", casesOpen), [casesOpen]);
 
   const refresh = useCallback(async () => {
     try {
@@ -26,9 +43,15 @@ export default function App() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  const openCase = (id: string) => {
+    setSelected(id);
+    if (window.innerWidth <= 900) setCasesOpen(false); // the drawer covers the page on small screens
+    requestAnimationFrame(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
   const onCreated = (c: CaseSummary) => {
-    setSelected(c.id);
     refresh();
+    openCase(c.id);
   };
 
   const onReset = async () => {
@@ -38,41 +61,51 @@ export default function App() {
     refresh();
   };
 
+  const selectedCase = cases.find((c) => c.id === selected) ?? null;
+
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="logo">GA</span>
-          <div>
-            <h1>Garnishment Agent</h1>
-            <p>Autonomous processing of garnishment orders · Banca Demo S.A.</p>
-          </div>
-        </div>
-        <div className="topbar-right">
-          {model && <span className="pill">LLM: {model}</span>}
-          <button className="btn ghost" onClick={onReset}>Reset demo</button>
-        </div>
-      </header>
-      {error && <div className="banner error">{error}</div>}
-      <main className="layout">
-        <Sidebar onCreated={onCreated} />
-        <CaseList cases={cases} selected={selected} onSelect={setSelected} />
-        <section className="detail">
-          {selected ? <CaseView key={selected} caseId={selected} /> : <EmptyState />}
-        </section>
-      </main>
-    </div>
-  );
-}
+      <Header theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} onReset={onReset} onCreated={onCreated} />
 
-function EmptyState() {
-  return (
-    <div className="empty">
-      <h2>Pick a scenario or upload a garnishment order</h2>
-      <p>
-        The supervisor plans the steps, delegates to specialised agents (reader, identification, legal, action) and only
-        asks a human operator when it is not sure. Every legal calculation is done by a deterministic rules engine.
-      </p>
+      <CasesSidebar
+        open={casesOpen}
+        onToggle={() => setCasesOpen(!casesOpen)}
+        cases={cases}
+        selected={selected}
+        onSelect={openCase}
+      />
+
+      <main className={`main ${casesOpen ? "shifted" : ""}`}>
+        {error && <div className="banner error">{error}</div>}
+        <div className="container">
+          <section className="hero">
+            <p className="eyebrow">Back-office automation</p>
+            <h1>Autonomous processing of garnishment orders</h1>
+          </section>
+
+          <UploadZone onCreated={onCreated} />
+          <Steps status={selectedCase?.status ?? null} />
+
+          <section className="detail-section" ref={detailRef} aria-label="Case details">
+            {selected ? (
+              <CaseView key={selected} caseId={selected} />
+            ) : (
+              <div className="empty">
+                <h2>No case selected</h2>
+                <p>
+                  Upload a garnishment order or pick a scenario from <strong>Demos</strong>. The agents' reasoning appears
+                  here live. Earlier cases are in the <strong>Cases</strong> panel on the left.
+                </p>
+              </div>
+            )}
+          </section>
+
+          <footer className="footer">
+            {model ? `Agents powered by ${model} on Amazon Bedrock. ` : ""}
+            All legal calculations are made by a deterministic rules engine.
+          </footer>
+        </div>
+      </main>
     </div>
   );
 }
