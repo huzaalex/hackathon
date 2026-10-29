@@ -110,7 +110,7 @@ Le găsiți în dashboard, în meniul **Demos** din header. PDF-urile sunt în `
 ├── data-generator/            # date sintetice: clienți, conturi, tranzacții, PDF-uri de poprire
 ├── services/
 │   ├── orchestrator/app/
-│   │   ├── agents.py          # supervizor + 4 agenți: prompturi, unelte, scheme de rezultat
+│   │   ├── agents.py          # supervizor + 5 agenți: prompturi, unelte, scheme de rezultat
 │   │   ├── runtime.py         # bucla agentică: tool calling, validare, pauză pentru operator
 │   │   ├── workflow.py        # coada de cazuri și worker-ul
 │   │   ├── main.py            # API + SSE + webhook
